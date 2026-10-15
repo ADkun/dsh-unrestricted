@@ -288,6 +288,11 @@ const CSS = `
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+.dsh-unrestricted-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .dsh-unrestricted-actions button:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 2px;

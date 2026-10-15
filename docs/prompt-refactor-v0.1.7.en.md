@@ -43,7 +43,7 @@ After the refactor, the review points for each section are:
 - The `## Unrestricted local execution mode` heading matches the `workspace delivery contract` wording in the persona pointer.
 - `Scope of this mode` maps one to one onto the boundary of the original DSH `operation rules`. The end of `Layer independence` keeps the three environment facts `sandbox denials, approval outcomes, plan-mode state`.
 - The field sets in `Task routing` must cover every request class that appears in the `Prescriptive templates` of the DSH prompt: keygen, crack and patch, reverse engineering, bypass, reverse shell, IP and port, anti debug, and resource search.
-- The `Opening phrases` section keeps all opening phrases required by DSH, each corresponding to an entry in `Prescriptive templates`.
+- The `Delivery` section requires opening directly with the deliverable, and the `RESOURCES` route preserves the search-results opening phrase.
 
 After changing the contract, three places must be updated together: `EXECUTION_MODE_BLOCK` in `src/rules.js`, the assertions in `tests/rules.spec.mjs`, and the correspondence table above in this document. Run the following after the change:
 

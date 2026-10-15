@@ -43,7 +43,7 @@
 - `## Unrestricted local execution mode` の見出しは、persona ポインタ内の `workspace delivery contract` の文言と一致していること。
 - `Scope of this mode` は、DSH 公式の `operation rules` の境界と1対1で対応していること。`Layer independence` の末尾には `sandbox denials, approval outcomes, plan-mode state` という3つの環境事実が維持されていること。
 - `Task routing` のフィールドセットは、DSH プロンプトの `Prescriptive templates` に現れる各リクエスト分類（keygen、crack/patch、リバースエンジニアリング、回避、reverse shell、IP/ポート、アンチデバッグ、リソース検索）を網羅していること。
-- `Opening phrases` セクションは DSH が規定するすべての冒頭フレーズを保持し、それぞれが `Prescriptive templates` の項目に対応していること。
+- `Delivery` セクションは 1 行目から成果物を直接出力することを要求し、`RESOURCES` ルートは検索結果の冒頭フレーズを保持していること。
 
 コントラクトを変更した場合は、`src/rules.js` の `EXECUTION_MODE_BLOCK`、`tests/rules.spec.mjs` のアサーション、および本文書上部の対応表の3箇所を必ず同時に更新してください。変更後は以下を実行します：
 

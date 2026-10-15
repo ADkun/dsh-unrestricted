@@ -36,9 +36,16 @@ export const zh = {
   previewLoading: '正在组装当前提示词…',
   previewUnavailable: '暂不可预览：',
   previewSize: '行',
+  previewSourceLive: '实时会话',
+  previewSourceStanding: '静态预设',
   settingsUnavailable: '当前连接不可写设置（远程浏览器只读）。',
   settingsLoading: '正在读取设置…',
   operationFailed: '操作失败：',
+  issueIdentity: 'DSH 身份开场白已变更',
+  issuePersona: '预设角色前缀已变更',
+  issuePlan: '计划模式段落已变更',
+  issuePtcOnly: 'PTC 模式 run_code 规则已变更',
+  issueStructuredOutput: '结构化输出指令已变更',
 } satisfies Record<string, string>
 
 /** Unrestricted card locale key union. */
@@ -80,9 +87,16 @@ export const en = {
   previewLoading: 'Assembling the current prompt…',
   previewUnavailable: 'No preview available: ',
   previewSize: 'lines',
+  previewSourceLive: 'live session',
+  previewSourceStanding: 'standing preset',
   settingsUnavailable: 'This connection cannot write settings (remote browser is read-only).',
   settingsLoading: 'Reading settings…',
   operationFailed: 'Operation failed: ',
+  issueIdentity: 'harness identity opening changed',
+  issuePersona: 'preset persona changed',
+  issuePlan: 'plan-mode section changed',
+  issuePtcOnly: 'ptc-mode run_code rule changed',
+  issueStructuredOutput: 'structured-output instruction changed',
 } satisfies Record<UnrestrictedLocaleKey, string>
 
 /** Dictionary namespace owned by this plugin. */

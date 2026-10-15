@@ -4,7 +4,7 @@
  * user is inspecting. All data arrives through the props shares; the only
  * component-local state is which preview is open.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: 本体插件管理页的配置槽位。
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
@@ -29,6 +29,15 @@ const MODE_ROWS: ReadonlyArray<{
   { id: 'minimal', labelKey: 'modeMinimal', presetKey: 'presetMinimal' },
 ]
 
+/** Known host issue strings mapped to localized dictionary keys. */
+const ISSUE_LOCALE_KEYS: Readonly<Record<string, UnrestrictedLocaleKey>> = {
+  'harness identity opening changed': 'issueIdentity',
+  'preset persona changed': 'issuePersona',
+  'plan-mode section changed': 'issuePlan',
+  'ptc-mode run_code rule changed': 'issuePtcOnly',
+  'structured-output instruction changed': 'issueStructuredOutput',
+}
+
 /** Locale key for one mode state. */
 function stateKey(mode: UnrestrictedModeState | undefined): UnrestrictedLocaleKey {
   switch (mode?.state) {
@@ -45,10 +54,19 @@ function stateKey(mode: UnrestrictedModeState | undefined): UnrestrictedLocaleKe
  * @returns the card.
  */
 export function UnrestrictedCard(props: UnrestrictedCardProps) {
-  const { t } = props
+  const { t, loadPreview } = props
   const view = props.useView(snapshot => snapshot)
   const status = view.status
   const [openPreview, setOpenPreview] = useState<string | null>(null)
+  const openEntry = openPreview === null ? undefined : view.previews[openPreview]
+
+  // When a refresh/recheck/toggle invalidates the preview map while a preview
+  // drawer is open, automatically reload that preset's preview.
+  useEffect(() => {
+    if (openPreview !== null && openEntry === undefined) {
+      void loadPreview(openPreview)
+    }
+  }, [openPreview, openEntry, loadPreview])
 
   const hasFailedMode = status !== null
     && Object.values(status.modes).some(mode => mode.state === 'failed')
@@ -74,6 +92,16 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
     if (entry === undefined || entry.status === 'failed') void props.loadPreview(presetId)
   }
 
+  /** Localize known anchor issues; pass dynamic probe errors through as-is. */
+  function formatIssues(issues: readonly string[]): string {
+    return issues
+      .map((issue) => {
+        const key = ISSUE_LOCALE_KEYS[issue]
+        return key !== undefined ? t(key) : issue
+      })
+      .join('; ')
+  }
+
   return (
     <details open className="dsh-unrestricted-card">
       <summary className="dsh-unrestricted-summary">
@@ -88,7 +116,7 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
           <input
             type="checkbox"
             checked={view.enabled}
-            disabled={!view.writable || view.settingsStatus !== 'ready'}
+            disabled={!view.writable || view.settingsStatus !== 'ready' || view.busy}
             onChange={(event) => { void props.setEnabled(event.target.checked) }}
           />
           <span>{t('toggle')}</span>
@@ -119,7 +147,7 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
                   {t(isOpen ? 'hidePreview' : 'showPreview')}
                 </button>
                 {mode !== undefined && mode.issues.length > 0 && (
-                  <span className="dsh-unrestricted-issues">{mode.issues.join('; ')}</span>
+                  <span className="dsh-unrestricted-issues">{formatIssues(mode.issues)}</span>
                 )}
                 {isOpen && (
                   <div className="dsh-unrestricted-preview">
@@ -136,7 +164,10 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
                     ) : (
                       <>
                         <p className="dsh-unrestricted-note">
-                          {t('previewSize')} {entry.preview?.lines} · {entry.preview?.bytes} B
+                          {entry.preview?.lines} {t('previewSize')} · {entry.preview?.bytes} B
+                          {entry.preview?.source !== undefined && (
+                            <> · {t(entry.preview.source === 'live' ? 'previewSourceLive' : 'previewSourceStanding')}</>
+                          )}
                         </p>
                         <pre className="dsh-unrestricted-previewText">{entry.preview?.text}</pre>
                       </>
@@ -155,8 +186,8 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
         <p className="dsh-unrestricted-note">{t('subagentNote')}</p>
         <p className="dsh-unrestricted-note">{t('scopeNote')}</p>
         <div className="dsh-unrestricted-actions">
-          <button type="button" onClick={() => { void props.recheck() }}>{t('recheck')}</button>
-          <button type="button" onClick={() => { void props.refresh() }}>{t('refresh')}</button>
+          <button type="button" disabled={view.busy} onClick={() => { void props.recheck() }}>{t('recheck')}</button>
+          <button type="button" disabled={view.busy} onClick={() => { void props.refresh() }}>{t('refresh')}</button>
         </div>
       </div>
     </details>

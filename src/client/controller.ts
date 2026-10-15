@@ -65,6 +65,8 @@ export interface UnrestrictedViewSnapshot {
   status: UnrestrictedStatus | null
   /** presetId -> fetched deploy preview. */
   previews: Record<string, UnrestrictedPreviewEntry>
+  /** Whether a status refresh or recheck RPC is currently in flight. */
+  busy: boolean
   /** Last transport/business failure, if any. */
   message?: string
 }
@@ -88,7 +90,7 @@ export interface UnrestrictedCardInjected {
   setEnabled: (enabled: boolean) => Promise<void>
   /** Re-run the host-side anchor checks and refresh. */
   recheck: () => Promise<void>
-  /** Re-read host status. */
+  /** Re-read host status and invalidate cached previews. */
   refresh: () => Promise<void>
   /** Fetch the exact fused prompt this preset would deploy. */
   loadPreview: (presetId: string) => Promise<void>
@@ -117,6 +119,7 @@ export function createUnrestrictedController(ctx: Context) {
     settingsStatus: 'loading',
     status: null,
     previews: {},
+    busy: false,
   }
   const listeners = new Set<() => void>()
 
@@ -136,6 +139,7 @@ export function createUnrestrictedController(ctx: Context) {
       settingsStatus: settingsSnapshot.status,
       status: snapshot.status,
       previews: snapshot.previews,
+      busy: snapshot.busy,
       message: snapshot.message,
     }
     for (const listener of listeners) listener()
@@ -147,33 +151,48 @@ export function createUnrestrictedController(ctx: Context) {
     return result.value
   }
 
-  async function refresh(): Promise<void> {
+  async function refresh(invalidatePreviews = false): Promise<void> {
+    snapshot = { ...snapshot, busy: true }
+    publish()
     try {
       const status = await call<UnrestrictedStatus>('status', {})
-      snapshot = { ...snapshot, status, message: undefined }
+      snapshot = {
+        ...snapshot,
+        status,
+        previews: invalidatePreviews ? {} : snapshot.previews,
+        busy: false,
+        message: undefined,
+      }
       publish()
     } catch (error) {
-      snapshot = { ...snapshot, message: messageOf(error) }
+      snapshot = { ...snapshot, busy: false, message: messageOf(error) }
       publish()
     }
   }
 
   async function setEnabled(enabled: boolean): Promise<void> {
-    await settings.set('enabled', enabled)
+    snapshot = { ...snapshot, busy: true }
     publish()
-    // Give the host settings watcher one turn before reading its derived state.
-    setTimeout(() => void refresh(), 300)
+    try {
+      await settings.set('enabled', enabled)
+      await refresh(true)
+    } catch (error) {
+      snapshot = { ...snapshot, busy: false, message: messageOf(error) }
+      publish()
+    }
   }
 
   async function recheck(): Promise<void> {
+    snapshot = { ...snapshot, busy: true }
+    publish()
     try {
       const status = await call<UnrestrictedStatus>('recheck', {})
       // The recheck invalidates every cached preview: the deployed bytes may
       // have changed under a new master.
-      snapshot = { ...snapshot, status, previews: {}, message: undefined }
+      snapshot = { ...snapshot, status, previews: {}, busy: false, message: undefined }
       publish()
     } catch (error) {
-      snapshot = { ...snapshot, message: messageOf(error) }
+      snapshot = { ...snapshot, busy: false, message: messageOf(error) }
       publish()
     }
   }
@@ -212,7 +231,7 @@ export function createUnrestrictedController(ctx: Context) {
   // forwards one document event per commit regardless of namespace.
   ctx.effect(
     () => ctx.remote.$on('settings/document-updated', (namespace?: string) => {
-      if (namespace === undefined || namespace === SETTINGS_NS) void refresh()
+      if (namespace === undefined || namespace === SETTINGS_NS) void refresh(true)
     }),
     'dsh-unrestricted: settings invalidations',
   )
@@ -221,7 +240,11 @@ export function createUnrestrictedController(ctx: Context) {
   void refresh()
   return {
     face: (): UnrestrictedCardInjected => ({
-      hooks: { view }, setEnabled, recheck, refresh, loadPreview,
+      hooks: { view },
+      setEnabled,
+      recheck,
+      refresh: () => refresh(true),
+      loadPreview,
     }),
   }
 }

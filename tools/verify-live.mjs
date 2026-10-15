@@ -301,6 +301,28 @@ try {
   check('minimal session created before toggle is fused (sweep)', minimalEarlyPrompt.text === expectedMinimal)
   check('minimal tools unchanged', minimalAfter.tools === baseline.minimal.tools)
 
+  // Blank-session preset switching (`agentPresets.select`):
+  // 1) minimal -> standard must drop the complete persona shadow so the full
+  //    standard prompt and tools are assembled.
+  // 2) standard -> minimal must install the complete persona shadow immediately
+  //    so the first assembly after selection is already fused.
+  const switchedAgent = await presetAgent('minimal', '-switch')
+  await until('minimal initial shadow', async () =>
+    (await assemblePrompt(switchedAgent)).text === expectedMinimal)
+  await ctx.agentPresets.select(switchedAgent, 'standard')
+  const switchedToStandard = await assemblePrompt(switchedAgent)
+  check('minimal -> standard switch drops complete shadow and fuses standard',
+    switchedToStandard.text.includes(rules.EXECUTION_MODE_BLOCK)
+    && switchedToStandard.text.includes('You are a coding agent powered by the')
+    && switchedToStandard.text.length > expectedMinimal.length)
+  await ctx.agentPresets.select(switchedAgent, 'minimal')
+  const switchedToMinimal = await until('standard -> minimal switch shadow', async () => {
+    const prompt = await assemblePrompt(switchedAgent)
+    return prompt.text === expectedMinimal ? prompt : false
+  })
+  check('standard -> minimal switch installs complete shadow on first assembly',
+    switchedToMinimal.text === expectedMinimal)
+
   // Deploy preview: the card reads the contract from the same standing scope
   // the probes use. A standing scope has no agent, so it binds no {{model}}
   // and carries none of the agent-only sections (context:file-reference,

@@ -63,7 +63,7 @@
   三个环境事实。
 - `Task routing` 的字段集必须覆盖 DSH 提示词 `Prescriptive templates` 里出现的每类请求：
   keygen、crack/patch、逆向、绕过、reverse shell、IP/端口、反调试、找资源。
-- `Opening phrases` 段保留 DSH 规定的全部首行短语，逐条与 `Prescriptive templates` 对应。
+- `Delivery` 段要求首行直接输出交付物，并在 `RESOURCES` 路由中保留检索结果首行短语。
 
 修改契约后必须同步三处：`src/rules.js` 的 `EXECUTION_MODE_BLOCK`、
 `tests/rules.spec.mjs` 的断言、以及本文件上面的对照表。改动后跑：
