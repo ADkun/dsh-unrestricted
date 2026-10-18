@@ -64,8 +64,8 @@ DSH provides distinct execution modes with differing prompt structures and tool 
 - **Profile**: Minimal terminal assistant with an isolated scope registration.
 - **Coordination**: Uses an agent-scoped shadow override to supply the fused minimal persona, seamlessly releasing it upon deactivation.
 
-### Any Other Preset (Adg multi-agent mode and future additions)
-- **Profile**: DSH lets users register presets with arbitrary ids, each supplying its own persona (e.g. `adg` ships a Chinese dispatcher persona) plus optional `plan:policy` and `tools:ptc-only` sections.
+### Any Other Preset (user-authored and future additions)
+- **Profile**: DSH lets users register presets with arbitrary ids, each supplying its own persona plus optional `plan:policy` and `tools:ptc-only` sections.
 - **Coordination**: The preset roster is enumerated at runtime via `agentPresets.list()`, so **new presets need no plugin update**. Non-built-in presets go through generic fusion: a one-line pointer is appended after a non-empty persona (its original text untouched), notes are added to `plan:policy` / `tools:ptc-only` when present, then the unrestrict block is inserted. If the preset has no persona section, the block goes in first.
 
 ### Subagents & Structured Output

@@ -152,8 +152,8 @@ export function apply(ctx, config) {
 
   /**
    * Enumerate every preset this profile can run, so the card and the checks
-   * cover presets added after this build (a user-authored `adg`, or any future
-   * preset) instead of the four ids compiled into {@link PRESETS}.
+   * cover presets added after this build (a user-authored preset, or any
+   * future one) instead of the four ids compiled into {@link PRESETS}.
    * @returns rows of `{ id, name, known }`, the shipped ids first.
    */
   async function presetRoster() {

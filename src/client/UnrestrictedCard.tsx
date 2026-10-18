@@ -2,7 +2,7 @@
  * The unrestricted settings page: one persisted toggle, the per-preset fusion
  * state reported by the host half, and the deploy preview for the preset the
  * user is inspecting. The preset roster is whatever the host reports, so a
- * preset added after this build (a user-authored `adg`, or any future one)
+ * preset added after this build (a user-authored preset, or any future one)
  * appears here without a plugin change. All data arrives through the props
  * shares; the only component-local state is which preview is open.
  */

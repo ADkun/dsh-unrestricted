@@ -25,8 +25,8 @@ export const ANCHORS = {
 
 /**
  * Preset ids this plugin ships knowledge about. They are no longer the limit of
- * what can be fused: every other preset id (a user-authored preset such as
- * `adg`, or a preset added after this build) resolves to {@link GENERIC_RULE}.
+ * what can be fused: every other preset id (a user-authored preset, or one
+ * added after this build) resolves to {@link GENERIC_RULE}.
  */
 export const PRESETS = ['standard', 'ptc', 'cordis', 'minimal']
 
@@ -208,7 +208,7 @@ const ISSUE_LABELS = {
  * original prompt untouched. Every other preset id is fused generically — the
  * pointer is appended to whatever persona it declares and each boundary note is
  * appended only where its section actually exists, so a preset authored after
- * this build (`adg`, or a user's own) is supported without a code change.
+ * this build (a user's own preset, or one added later) is supported without a code change.
  *
  * @param sections - AssembledSection-shaped rows ({ name, text }) from the waterfall.
  * @param presetId - the composed preset id (known or generic).

@@ -384,7 +384,7 @@ test('contractAdditions describes exactly what each preset receives', () => {
   assert.equal(contractAdditions('minimal').planNote, '')
   // Unknown presets fuse generically: the block and pointer always deploy, and
   // the boundary notes are appended only where the section exists.
-  const generic = contractAdditions('adg')
+  const generic = contractAdditions('my-custom-preset')
   assert.equal(generic.block, EXECUTION_MODE_BLOCK)
   assert.ok(generic.pointer.length > 0)
   assert.equal(contractAdditions('').pointer, generic.pointer)
