@@ -1,6 +1,6 @@
 {
   "name": "dsh-unrestricted",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "engines": {
     "dsh": ">=0.2.0-rc.2 <0.2.2-0"
   },
@@ -9,10 +9,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yexi-by/dsh-unrestricted.git"
+    "url": "https://github.com/ADkun/dsh-unrestricted.git"
   },
-  "homepage": "https://github.com/yexi-by/dsh-unrestricted#readme",
-  "bugs": "https://github.com/yexi-by/dsh-unrestricted/issues",
+  "homepage": "https://github.com/ADkun/dsh-unrestricted#readme",
+  "bugs": "https://github.com/ADkun/dsh-unrestricted/issues",
   "type": "module",
   "main": "src/node.js",
   "exports": {
