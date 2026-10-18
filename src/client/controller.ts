@@ -65,7 +65,7 @@ export interface UnrestrictedViewSnapshot {
   status: UnrestrictedStatus | null
   /** presetId -> fetched deploy preview. */
   previews: Record<string, UnrestrictedPreviewEntry>
-  /** Whether a status refresh or recheck RPC is currently in flight. */
+  /** 是否仍有设置写入或状态检查尚未完成。 */
   busy: boolean
   /** Last transport/business failure, if any. */
   message?: string
@@ -122,6 +122,10 @@ export function createUnrestrictedController(ctx: Context) {
     busy: false,
   }
   const listeners = new Set<() => void>()
+  // 每个预设只接收最近一次请求；清空标记同时废弃所有在途旧预览。
+  const previewRequests = new Map<string, symbol>()
+  let statusGeneration = 0
+  let pendingOperations = 0
 
   const view: UnrestrictedViewSource = {
     getSnapshot: () => snapshot,
@@ -133,16 +137,23 @@ export function createUnrestrictedController(ctx: Context) {
 
   function publish(): void {
     const settingsSnapshot = settings.getSnapshot()
+    const enabled = settingsSnapshot.value?.enabled === true
+    if (enabled !== snapshot.enabled) invalidatePreviews()
     snapshot = {
-      enabled: settingsSnapshot.value?.enabled === true,
+      enabled,
       writable: settingsSnapshot.writable,
       settingsStatus: settingsSnapshot.status,
       status: snapshot.status,
       previews: snapshot.previews,
-      busy: snapshot.busy,
+      busy: pendingOperations > 0,
       message: snapshot.message,
     }
     for (const listener of listeners) listener()
+  }
+
+  function invalidatePreviews(): void {
+    previewRequests.clear()
+    snapshot = { ...snapshot, previews: {} }
   }
 
   async function call<T>(endpoint: string, payload: unknown): Promise<T> {
@@ -151,50 +162,49 @@ export function createUnrestrictedController(ctx: Context) {
     return result.value
   }
 
-  async function refresh(invalidatePreviews = false): Promise<void> {
-    snapshot = { ...snapshot, busy: true }
+  async function whileBusy(action: () => Promise<void>): Promise<void> {
+    pendingOperations++
     publish()
     try {
-      const status = await call<UnrestrictedStatus>('status', {})
-      snapshot = {
-        ...snapshot,
-        status,
-        previews: invalidatePreviews ? {} : snapshot.previews,
-        busy: false,
-        message: undefined,
+      await action()
+    } finally {
+      pendingOperations--
+      publish()
+    }
+  }
+
+  function readStatus(endpoint: 'status' | 'recheck', clearPreviews: boolean): Promise<void> {
+    const generation = ++statusGeneration
+    return whileBusy(async () => {
+      try {
+        const status = await call<UnrestrictedStatus>(endpoint, {})
+        if (generation !== statusGeneration) return
+        if (clearPreviews) invalidatePreviews()
+        snapshot = { ...snapshot, status, message: undefined }
+      } catch (error) {
+        if (generation !== statusGeneration) return
+        snapshot = { ...snapshot, message: messageOf(error) }
       }
-      publish()
-    } catch (error) {
-      snapshot = { ...snapshot, busy: false, message: messageOf(error) }
-      publish()
-    }
+    })
   }
 
-  async function setEnabled(enabled: boolean): Promise<void> {
-    snapshot = { ...snapshot, busy: true }
-    publish()
-    try {
-      await settings.set('enabled', enabled)
-      await refresh(true)
-    } catch (error) {
-      snapshot = { ...snapshot, busy: false, message: messageOf(error) }
-      publish()
-    }
+  function refresh(clearPreviews = false): Promise<void> {
+    return readStatus('status', clearPreviews)
   }
 
-  async function recheck(): Promise<void> {
-    snapshot = { ...snapshot, busy: true }
-    publish()
-    try {
-      const status = await call<UnrestrictedStatus>('recheck', {})
-      // The recheck invalidates every cached preview: the deployed bytes may
-      // have changed under a new master.
-      snapshot = { ...snapshot, status, previews: {}, busy: false, message: undefined }
-      publish()
-    } catch (error) {
-      snapshot = { ...snapshot, busy: false, message: messageOf(error) }
-      publish()
-    }
+  function setEnabled(enabled: boolean): Promise<void> {
+    return whileBusy(async () => {
+      try {
+        await settings.set('enabled', enabled)
+        await refresh(true)
+      } catch (error) {
+        snapshot = { ...snapshot, message: messageOf(error) }
+      }
+    })
+  }
+
+  function recheck(): Promise<void> {
+    return readStatus('recheck', true)
   }
 
   /**
@@ -203,6 +213,8 @@ export function createUnrestrictedController(ctx: Context) {
    * @param presetId - preset id from the card's row.
    */
   async function loadPreview(presetId: string): Promise<void> {
+    const request = Symbol(presetId)
+    previewRequests.set(presetId, request)
     snapshot = {
       ...snapshot,
       previews: { ...snapshot.previews, [presetId]: { status: 'loading' } },
@@ -210,11 +222,13 @@ export function createUnrestrictedController(ctx: Context) {
     publish()
     try {
       const preview = await call<UnrestrictedPreview>('preview', { presetId })
+      if (previewRequests.get(presetId) !== request) return
       snapshot = {
         ...snapshot,
         previews: { ...snapshot.previews, [presetId]: { status: 'ready', preview } },
       }
     } catch (error) {
+      if (previewRequests.get(presetId) !== request) return
       snapshot = {
         ...snapshot,
         previews: { ...snapshot.previews, [presetId]: { status: 'failed', message: messageOf(error) } },

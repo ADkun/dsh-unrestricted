@@ -156,6 +156,35 @@ async function setEnabled(enabled) {
   await ctx.settings.update('unrestricted', { enabled })
 }
 
+/** 用原生子代理组合和作用域工具注册复现 Minimal 的角色及报告协议。 */
+async function minimalChild(suffix, persona) {
+  const parent = await presetAgent('minimal')
+  const handle = await parent.ctx.agents.create({
+    sessionId: SessionId(`verify-minimal-child-${suffix}`),
+    meta: childSessionMeta(parent, 1, false),
+    agentOptions: AGENT_OPTIONS,
+    setup: agentCtx => {
+      applyChildComposition(agentCtx, parent, persona === undefined ? {} : { persona })
+      if (persona !== undefined) {
+        agentCtx.systemPrompt.section({ name: 'review:criteria', order: 20, text: 'Preserve the supplied review criteria.' })
+      }
+      agentCtx.tools.register({
+        name: 'structured_output', description: 'Report a structured review.',
+        parameters: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] },
+        output: { schema: { type: 'object', properties: {}, additionalProperties: false }, render: () => [] },
+        execute: async () => { throw new Error('This assembly check must not execute a tool') },
+      })
+      agentCtx.systemPrompt.section({
+        name: 'tool:structured_output',
+        order: agentCtx.systemPrompt.getSectionOrder('STRUCTURED_OUTPUT'),
+        text: rules.ANCHORS.structuredOutputFull,
+      })
+    },
+  })
+  agents.set(`minimal-child-${suffix}`, handle)
+  return handle.agent
+}
+
 /**
  * Reproduce the card's preview path without the browser: assemble the standing
  * scope, fuse it, and render it through the same harness renderer the host
@@ -226,6 +255,11 @@ try {
   // An agent that exists BEFORE the toggle must switch on the next assembly.
   const preExisting = await presetAgent('standard', '-pre')
   check('minimal baseline is the stock persona', baseline.minimal.text === 'You are a helpful software engineer assistant.')
+  const customPersona = 'Review only this delegated code and preserve the caller role.'
+  const customMinimal = await minimalChild('custom-before-toggle', customPersona)
+  const customBaseline = await assemblePrompt(customMinimal)
+  const structuredMinimal = await minimalChild('structured-before-toggle')
+  const structuredBaseline = await assemblePrompt(structuredMinimal)
 
   console.log('toggle on')
   await setEnabled(true)
@@ -301,6 +335,25 @@ try {
   check('minimal session created before toggle is fused (sweep)', minimalEarlyPrompt.text === expectedMinimal)
   check('minimal tools unchanged', minimalAfter.tools === baseline.minimal.tools)
 
+  // 既有子代理由开启时的 sweep 处理；新子代理由 created 事件处理。
+  const customAfterEnable = await minimalChild('custom-after-toggle', customPersona)
+  for (const [label, agent] of [['existing', customMinimal], ['new', customAfterEnable]]) {
+    const prompt = await assemblePrompt(agent)
+    check(`minimal ${label} custom child keeps its persona and system rule`,
+      prompt.text.includes(customPersona) && prompt.text.includes('Preserve the supplied review criteria.'))
+    check(`minimal ${label} custom child fuses once and keeps the report protocol`,
+      prompt.text.split(rules.EXECUTION_MODE_BLOCK).length === 2
+      && prompt.text.includes(rules.ANCHORS.structuredOutputFull))
+    check(`minimal ${label} custom child keeps tools and contexts`,
+      prompt.tools === customBaseline.tools && prompt.contexts === customBaseline.contexts)
+  }
+  const structuredPrompt = await assemblePrompt(structuredMinimal)
+  check('minimal scoped structured tool keeps its native system instruction',
+    JSON.parse(structuredPrompt.tools).some(tool => tool.name === 'structured_output')
+    && structuredPrompt.text.includes(rules.ANCHORS.structuredOutputFull))
+  check('minimal structured child keeps its original tools and contexts',
+    structuredPrompt.tools === structuredBaseline.tools && structuredPrompt.contexts === structuredBaseline.contexts)
+
   // Blank-session preset switching (`agentPresets.select`):
   // 1) minimal -> standard must drop the complete persona shadow so the full
   //    standard prompt and tools are assembled.
@@ -356,6 +409,15 @@ try {
     })
     check(`${id} restored to original`, off.text === baseline[id].text)
     check(`${id} tools still unchanged`, off.tools === baseline[id].tools)
+  }
+  for (const [label, agent, expected] of [
+    ['existing custom', customMinimal, customBaseline],
+    ['new custom', customAfterEnable, customBaseline],
+    ['structured', structuredMinimal, structuredBaseline],
+  ]) {
+    const off = await assemblePrompt(agent)
+    check(`minimal ${label} child restores native bytes after disabling`,
+      off.text === expected.text && off.tools === expected.tools && off.contexts === expected.contexts)
   }
 } finally {
   for (const handle of agents.values()) await handle.dispose()

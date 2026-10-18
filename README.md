@@ -4,9 +4,9 @@
 
 `dsh-unrestricted` 是 DeepSeek Harness（DSH）的提示词破限插件。插件通过尝试向系统提示词（System Prompt）注入专门设计的破限规则，解除模型在代码逆向、网络安全、敏感内容创作等场景下的回答限制，让模型直接输出完整、可用的技术实现与代码方案。
 
-插件针对 DSH 的提示词组装机制进行了深度适配，在动态注入破限提示词的同时，完整保留 DSH 的工具调用协议、计划模式（Plan Mode）、代码执行（PTC）以及子代理运行逻辑。
+插件保持轻量：通过现有开关整体启停破限规则，保留 DSH 原有的界面布局、工具调用协议、计划模式（Plan Mode）、代码执行（PTC）以及子代理运行逻辑。
 
-`0.2.3` 已在 DSH `0.2.1-rc.2`（`687f282e86`）复核类型检查、构建、33 项测试与真实宿主集成，四种模式启停恢复、空白会话预设切换和启动时启用均通过。相对 `0.2.1-alpha.4`，使用的组装与预设接口未变，代码、构建产物及版本保持不变。`engines.dsh` 声明为 `>=0.2.0-rc.2 <0.2.2-0`，保留本机桌面版 `0.2.0-rc.2` 的安装支持；本轮不操作桌面界面。
+`0.2.4` 修复 Minimal 自定义角色子代理的提示词注册冲突、结构化子代理遗漏官方输出指引，以及设置页并发请求导致的旧预览覆盖和忙碌状态提前解除。现有提示词规则与开关保持不变。支持 DSH `0.2.1-rc.2`（`687f282e86`），`engines.dsh` 为 `>=0.2.0-rc.2 <0.2.2-0`；保留桌面版 `0.2.0-rc.2` 的安装支持，本轮桌面端仅同步安装副本，不操作或验证桌面界面。
 
 官方新增的自定义模型推理等级与插件索引不替代本插件的按模式提示词组装功能；本轮保留插件。模型推理等级统一由官方模型设置管理。
 
@@ -84,7 +84,7 @@
 - **标准模式（Standard）与 Cordis 模式**：保留所有原生工具定义，在角色设定后注入破限规则，使模型在编写代码、执行系统命令和搜索网络时解除限制。
 - **代码执行模式（PTC）**：PTC 模式下模型仅能调用 `run_code`。插件在 `tools:ptc-only` 中补充规则，指示模型在编写 Python/Node 脚本时同样遵循无限制规则，脚本内部调用 SDK 工具进行安全扫描或逆向分析不受对话限制。
 - **计划模式（Plan Mode）**：将“操作安全”与“方案内容”解耦。插件明确指引：**安全限制仅约束执行时机**（在用户审批前不得修改文件），但在计划草案（Markdown）中，模型必须**毫无保留地展开完整的技术细节、攻击路径与实现代码**。
-- **极简模式（Minimal）**：极简模式在底层使用独立的作用域注册机制。插件通过代理替换完整的角色设定实现注入，关闭开关时自动释放代理并恢复原版。
+- **极简模式（Minimal）**：在当前智能体作用域中注入规则，保留子代理的自定义角色正文与官方结构化输出指引，避免重复注册角色提示词；关闭开关时恢复原版。
 - **子代理与工作流**：派生出的后台子代理及带有结构化输出（`structured_output`）的子任务，均自动继承父级模式的破限规则。
 
 ### 特征文本校验与安全降级
@@ -111,7 +111,7 @@
 #### 安装
 ```sh
 # 安装指定版本
-dsh plugin --profile web add github:yexi-by/dsh-unrestricted#v0.2.3
+dsh plugin --profile web add github:yexi-by/dsh-unrestricted#v0.2.4
 
 # 或安装 master 最新代码
 dsh plugin --profile web add github:yexi-by/dsh-unrestricted
@@ -148,7 +148,7 @@ dsh plugin --profile web remove dsh-unrestricted
 1. 完全退出正在运行的桌面客户端。
 2. 打开 PowerShell 或 CMD，执行安装命令：
    ```powershell
-   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:yexi-by/dsh-unrestricted#v0.2.3
+   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:yexi-by/dsh-unrestricted#v0.2.4
    ```
 3. 启动桌面客户端，按下方说明启用插件与功能开关。
 

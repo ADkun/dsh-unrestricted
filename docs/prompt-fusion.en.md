@@ -62,7 +62,7 @@ DSH provides distinct execution modes with differing prompt structures and tool 
 
 ### Minimal Mode
 - **Profile**: Minimal terminal assistant with an isolated scope registration.
-- **Coordination**: Uses an agent-scoped shadow override to supply the fused minimal persona, seamlessly releasing it upon deactivation.
+- **Coordination**: Preserves the persona text while injecting rules in the current agent scope, restoring the original prompt upon deactivation. `0.2.4` fixes assembly failures caused by duplicate persona registration in Minimal subagents with custom personas and preserves the native `structured_output` instructions required by structured subagents.
 
 ### Subagents & Structured Output
 - **Subagents**: Background child agents inherit the unrestrict rules of their parent mode.
@@ -84,12 +84,14 @@ Computes a SHA-256 hash (first 16 hex characters) of the unrestrict text block, 
 ### Realtime Prompt Preview
 An RPC endpoint renders the exact, fully assembled prompt text, total line count, and byte size for each mode, ensuring complete transparency.
 
+When refreshes or rechecks overlap, stale responses cannot overwrite the latest status or preview. The busy state remains active until all pending status operations finish.
+
 ---
 
 ## 5. Automated Testing
 
 ```sh
-# Run the 33-assertion test suite
+# Run the test suite
 pnpm test
 
 # Dump fresh prompts from DSH source to update fixtures

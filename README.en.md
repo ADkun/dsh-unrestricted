@@ -4,9 +4,9 @@
 
 `dsh-unrestricted` is a system prompt unrestrict (jailbreak) plugin for **DeepSeek Harness (DSH)**. It injects purpose-built unrestrict rules directly into DSH's system prompts, removing refusal boundaries across reverse engineering, penetration testing, creative writing, and specialized technical operations, enabling models to directly output complete, actionable implementations and code.
 
-The plugin is deeply integrated into DSH's prompt assembly pipeline. While injecting unrestrict rules, it strictly preserves DSH's tool-calling protocols, Plan Mode, code execution (PTC), and subagent mechanics.
+The plugin stays lightweight: the existing switches enable or disable the rules as a whole, preserving DSH's interface layout, tool-calling protocols, Plan Mode, code execution (PTC), and subagent mechanics.
 
-`0.2.3` passes type checking, builds, 33 tests, and real-host integration checks against DSH `0.2.1-rc.2` (`687f282e86`), including four-mode toggle restoration, blank-session preset switching, and startup-enabled behavior. The assembly and preset APIs used here are unchanged from `0.2.1-alpha.4`; code, build artifacts, and package version remain unchanged. The declared `engines.dsh` range is `>=0.2.0-rc.2 <0.2.2-0`, retaining installation support for the local `0.2.0-rc.2` desktop runtime; no desktop UI check was performed in this update.
+`0.2.4` fixes prompt registration conflicts in Minimal subagents with custom personas, missing native structured-output instructions, and overlapping settings requests that could overwrite a newer preview or clear the busy state too early. The prompt rules and existing switches remain unchanged. It supports DSH `0.2.1-rc.2` (`687f282e86`) with `engines.dsh` set to `>=0.2.0-rc.2 <0.2.2-0`, retaining installation support for desktop `0.2.0-rc.2`. For desktop, this update synchronizes the installed plugin only; the desktop UI is not operated or tested.
 
 The native model reasoning settings and plugin index do not replace this plugin's per-mode prompt assembly. Reasoning levels remain managed by the native model settings.
 
@@ -84,7 +84,7 @@ The plugin coordinates rules across all DSH execution presets:
 - **Standard & Cordis Modes**: Injects the unrestrict block directly after the persona prefix, keeping all built-in tools (terminal, filesystem, web search) functional.
 - **PTC Mode (Code-Only Execution)**: Since PTC agents interact only via `run_code`, an additional guideline is injected into `tools:ptc-only`, clarifying that Python/Node scripts executed inside `run_code` are unconstrained and free to use internal SDK tools for automated analysis.
 - **Plan Mode**: Decouples operational constraints from planning depth. The plugin explicitly reinforces that **operational constraints apply only to mutations** (no file edits prior to approval), but **the plan markdown must contain unabridged technical procedures, exploit mechanisms, or reverse engineering steps**.
-- **Minimal Mode**: Uses an agent-scoped shadow override to supply the fused minimal persona, cleanly releasing it upon deactivation.
+- **Minimal Mode**: Injects rules in the current agent scope while preserving custom subagent personas and native structured-output instructions, avoiding duplicate persona registration. Disabling the plugin restores the original prompt.
 - **Subagents & Structured Output**: Background child agents and structured reporting (`structured_output`) automatically inherit the unrestrict rules.
 
 ### Anchor Text Verification & Safe Fallback
@@ -111,7 +111,7 @@ For CLI and server setups running `dsh web`.
 #### Install
 ```sh
 # Install specific tag
-dsh plugin --profile web add github:yexi-by/dsh-unrestricted#v0.2.3
+dsh plugin --profile web add github:yexi-by/dsh-unrestricted#v0.2.4
 
 # Or track master
 dsh plugin --profile web add github:yexi-by/dsh-unrestricted
@@ -148,7 +148,7 @@ On Windows, the default path is:
 1. Completely exit the desktop app.
 2. Run in PowerShell or CMD:
    ```powershell
-   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:yexi-by/dsh-unrestricted#v0.2.3
+   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:yexi-by/dsh-unrestricted#v0.2.4
    ```
 3. Launch the desktop app and follow the activation steps below.
 

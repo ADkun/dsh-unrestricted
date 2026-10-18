@@ -76,6 +76,8 @@ export function apply(ctx, config) {
     runtime: new Map(),
     /** Agent -> section disposer for minimal persona shadows. */
     shadows: new Map(),
+    /** 已由调用方在 agent scope 注册 persona 的 Minimal agent。 */
+    customMinimal: new WeakSet(),
     /** Fused minimal prompt, computed only after the minimal anchors verify. */
     fusedMinimal: null,
     /** presetId -> last successfully fused top-level live assembly (the deploy preview). */
@@ -212,22 +214,29 @@ export function apply(ctx, config) {
       unshadowMinimal(agent)
       return
     }
-    if (state.shadows.has(agent)) return
-    const dispose = agent.ctx.systemPrompt.section({
-      name: 'deployment:persona-prefix',
-      order: 0,
-      complete: true,
-      text: (context) => {
-        // Preserve structured-output instructions when a structured subagent
-        // runs under minimal.
-        const hasStructured = context?.agent?.ctx?.tools
-          ?.schemas?.()
-          ?.some(tool => tool.name === 'structured_output') === true
-        return hasStructured
-          ? fusedMinimalPrompt(ANCHORS.structuredOutputFull)
-          : (state.fusedMinimal ?? fusedMinimalPrompt())
-      },
-    })
+    if (state.shadows.has(agent) || state.customMinimal.has(agent)) return
+    let dispose
+    try {
+      dispose = agent.ctx.systemPrompt.section({
+        name: 'deployment:persona-prefix',
+        order: 0,
+        complete: true,
+        text: (context) => {
+          // 结构化工具注册在子代理 scope，不能只查询全局工具目录。
+          const hasStructured = context?.agent?.ctx?.tools
+            ?.schemas?.(context.agent)
+            ?.some(tool => tool.name === 'structured_output') === true
+          return hasStructured
+            ? fusedMinimalPrompt(ANCHORS.structuredOutputFull)
+            : (state.fusedMinimal ?? fusedMinimalPrompt())
+        },
+      })
+    } catch (error) {
+      // 原生委派角色已占用同一名称；保留调用方贡献，在组装时融合。
+      if (messageOf(error) !== 'prompt section "deployment:persona-prefix" is already registered in this scope') throw error
+      state.customMinimal.add(agent)
+      return
+    }
     state.shadows.set(agent, dispose)
     state.fusedText.set('minimal', state.fusedMinimal)
   }
@@ -394,6 +403,14 @@ export function apply(ctx, config) {
       // the fused minimal section for this assembly when possible.
       await ensureCheck('minimal')
       syncMinimalShadow(agent)
+      if (state.customMinimal.has(agent) && usable('minimal')) {
+        const fused = fuseSections(original.sections, 'minimal', { isSubagent: true })
+        if (fused.issues !== undefined) {
+          state.runtime.set('minimal', fused.issues)
+          return original
+        }
+        return { ...original, sections: fused.sections }
+      }
       return original
     }
     // If this blank session was previously `minimal` and switched to another
@@ -431,6 +448,7 @@ export function apply(ctx, config) {
   ctx.on('agent-preset/selected', (sessionId) => {
     const agent = ctx.get('agents')?.get?.(sessionId)
     if (agent === undefined) return
+    state.customMinimal.delete(agent)
     if (!state.enabled) {
       unshadowMinimal(agent)
       return
@@ -439,6 +457,7 @@ export function apply(ctx, config) {
   })
 
   ctx.on('agent/disposed', ({ agent }) => {
+    state.customMinimal.delete(agent)
     unshadowMinimal(agent)
   })
 
