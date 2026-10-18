@@ -6,7 +6,7 @@
 
 插件保持轻量：通过现有开关整体启停破限规则，保留 DSH 原有的界面布局、工具调用协议、计划模式（Plan Mode）、代码执行（PTC）以及子代理运行逻辑。
 
-`0.2.4` 修复 Minimal 自定义角色子代理的提示词注册冲突、结构化子代理遗漏官方输出指引，以及设置页并发请求导致的旧预览覆盖和忙碌状态提前解除。现有提示词规则与开关保持不变。支持 DSH `0.2.1-rc.2`（`687f282e86`），`engines.dsh` 为 `>=0.2.0-rc.2 <0.2.2-0`；保留桌面版 `0.2.0-rc.2` 的安装支持，本轮桌面端仅同步安装副本，不操作或验证桌面界面。
+`0.3.0` = 上游 `0.2.4` 同步 + 本 fork 自有特性（设置页迁移、任意预设自动适配、输入框内部工具栏开关）。上游 `0.2.4` 修复 Minimal 自定义角色子代理的提示词注册冲突、结构化子代理遗漏官方输出指引，以及设置页并发请求导致的旧预览覆盖和忙碌状态提前解除。现有提示词规则与开关保持不变。支持 DSH `0.2.1-rc.2`（`687f282e86`），`engines.dsh` 为 `>=0.2.0-rc.2 <0.2.2-0`；保留桌面版 `0.2.0-rc.2` 的安装支持，本轮桌面端仅同步安装副本，不操作或验证桌面界面。
 
 官方新增的自定义模型推理等级与插件索引不替代本插件的按模式提示词组装功能；本轮保留插件。模型推理等级统一由官方模型设置管理。
 
@@ -114,7 +114,7 @@
 #### 安装
 ```sh
 # 安装指定版本
-dsh plugin --profile web add github:ADkun/dsh-unrestricted#v0.2.4
+dsh plugin --profile web add github:ADkun/dsh-unrestricted#v0.3.0
 
 # 或安装 master 最新代码
 dsh plugin --profile web add github:ADkun/dsh-unrestricted
@@ -151,7 +151,7 @@ dsh plugin --profile web remove dsh-unrestricted
 1. 完全退出正在运行的桌面客户端。
 2. 打开 PowerShell 或 CMD，执行安装命令：
    ```powershell
-   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:ADkun/dsh-unrestricted#v0.2.4
+   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:ADkun/dsh-unrestricted#v0.3.0
    ```
 3. 启动桌面客户端，按下方说明启用插件与功能开关。
 

@@ -6,7 +6,7 @@
 
 プラグインは軽量な構成を維持し、既存のスイッチでルール全体を有効・無効にします。DSH 本来の画面レイアウト、ツール呼び出しプロトコル、計画モード（Plan Mode）、コード実行（PTC）、サブエージェントの実行ロジックを維持します。
 
-`0.2.4` は、カスタムペルソナを持つ Minimal サブエージェントのプロンプト登録競合、公式の構造化出力指示の欠落、設定画面の並行リクエストによる古いプレビューの上書きや処理中状態の早期解除を修正します。既存のプロンプトルールとスイッチは変更しません。DSH `0.2.1-rc.2`（`687f282e86`）に対応し、`engines.dsh` は `>=0.2.0-rc.2 <0.2.2-0` です。デスクトップ版 `0.2.0-rc.2` へのインストールも引き続きサポートします。今回はローカルのデスクトップ用インストールのみ同期し、デスクトップ UI の操作・検証は行いません。
+`0.3.0` は上流 `0.2.4` の同期に本 fork 独自の機能（設定ページ移行、任意プリセットの自動適応、入力欄内ツールバーのトグル）を加えたものです。上流 `0.2.4` は、カスタムペルソナを持つ Minimal サブエージェントのプロンプト登録競合、公式の構造化出力指示の欠落、設定画面の並行リクエストによる古いプレビューの上書きや処理中状態の早期解除を修正します。既存のプロンプトルールとスイッチは変更しません。DSH `0.2.1-rc.2`（`687f282e86`）に対応し、`engines.dsh` は `>=0.2.0-rc.2 <0.2.2-0` です。デスクトップ版 `0.2.0-rc.2` へのインストールも引き続きサポートします。今回はローカルのデスクトップ用インストールのみ同期し、デスクトップ UI の操作・検証は行いません。
 
 公式の推論レベル設定とプラグイン索引は、本プラグインのモード別プロンプト組み立てを代替しません。推論レベルは公式のモデル設定で管理します。
 
@@ -112,7 +112,7 @@ CLI またはサーバー環境で `dsh web` を実行している場合。
 #### インストール
 ```sh
 # 指定バージョンのインストール
-dsh plugin --profile web add github:ADkun/dsh-unrestricted#v0.2.4
+dsh plugin --profile web add github:ADkun/dsh-unrestricted#v0.3.0
 
 # または master 最新コードのインストール
 dsh plugin --profile web add github:ADkun/dsh-unrestricted
@@ -149,7 +149,7 @@ Windows の標準パス：
 1. デスクトップアプリを完全に終了します。
 2. PowerShell 等で以下を実行します：
    ```powershell
-   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:ADkun/dsh-unrestricted#v0.2.4
+   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:ADkun/dsh-unrestricted#v0.3.0
    ```
 3. デスクトップアプリを起動し、下記の使用方法に従って設定を完了します。
 

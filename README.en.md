@@ -6,7 +6,7 @@
 
 The plugin stays lightweight: the existing switches enable or disable the rules as a whole, preserving DSH's interface layout, tool-calling protocols, Plan Mode, code execution (PTC), and subagent mechanics.
 
-`0.2.4` fixes prompt registration conflicts in Minimal subagents with custom personas, missing native structured-output instructions, and overlapping settings requests that could overwrite a newer preview or clear the busy state too early. The prompt rules and existing switches remain unchanged. It supports DSH `0.2.1-rc.2` (`687f282e86`) with `engines.dsh` set to `>=0.2.0-rc.2 <0.2.2-0`, retaining installation support for desktop `0.2.0-rc.2`. For desktop, this update synchronizes the installed plugin only; the desktop UI is not operated or tested.
+`0.3.0` = upstream `0.2.4` plus this fork's own features (settings section migration, automatic adaptation for arbitrary presets, in-composer toolbar toggle). Upstream `0.2.4` fixes prompt registration conflicts in Minimal subagents with custom personas, missing native structured-output instructions, and overlapping settings requests that could overwrite a newer preview or clear the busy state too early. The prompt rules and existing switches remain unchanged. It supports DSH `0.2.1-rc.2` (`687f282e86`) with `engines.dsh` set to `>=0.2.0-rc.2 <0.2.2-0`, retaining installation support for desktop `0.2.0-rc.2`. For desktop, this update synchronizes the installed plugin only; the desktop UI is not operated or tested.
 
 The native model reasoning settings and plugin index do not replace this plugin's per-mode prompt assembly. Reasoning levels remain managed by the native model settings.
 
@@ -114,7 +114,7 @@ For CLI and server setups running `dsh web`.
 #### Install
 ```sh
 # Install specific tag
-dsh plugin --profile web add github:ADkun/dsh-unrestricted#v0.2.4
+dsh plugin --profile web add github:ADkun/dsh-unrestricted#v0.3.0
 
 # Or track master
 dsh plugin --profile web add github:ADkun/dsh-unrestricted
@@ -151,7 +151,7 @@ On Windows, the default path is:
 1. Completely exit the desktop app.
 2. Run in PowerShell or CMD:
    ```powershell
-   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:ADkun/dsh-unrestricted#v0.2.4
+   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:ADkun/dsh-unrestricted#v0.3.0
    ```
 3. Launch the desktop app and follow the activation steps below.
 
