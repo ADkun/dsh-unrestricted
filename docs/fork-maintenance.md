@@ -61,3 +61,19 @@ ja：`その他の任意プリセット（ユーザー自作および今後の�
   版本 0.2.0-rc.2），路径布局不同，直接跑 verify-live 不可行。
 - 为跑 typecheck 已把 14 个宿主包从该 npx 缓存拷进
   `plugins/dsh-unrestricted/node_modules/@deepseek-ai/`（仅本地，不入库）。
+- 插件 `node_modules` 不完整（缺 `.bin`、缺 `@rolldown/pluginutils`），
+  当前 `pnpm build` / `npx tsdown` 均失败；`lib/client.js` 是 2026-10-18 21:01
+  那次成功构建的产物，已完成合并检查（含 `previewRequests`/`statusGeneration`/
+  `pendingOperations`/`readStatus`）。**要重建需先 `pnpm install --force` 修复依赖树。**
+
+## 当前状态（2026-10-18 · v0.2.4 同步收口）
+
+- 分支：`master` 跟踪 **fork/master**（此前误跟 origin/master，已改），
+  `feat/settings-section-any-preset` 已快进到同一提交。
+- tag：`v0.2.4-fork-sync`（同步点，d9f264d）、`v0.3.0`（fork 发布点，648f7ec）。
+- 远端 fork 已有 `master`、`feat/settings-section-any-preset`、上述两个 tag。
+- 版本：`0.3.0` = 上游 v0.2.4 + fork 特性（设置页迁移、任意预设适配、
+  输入框内开关）。README 三语言的安装标签均指向 `ADkun/...#v0.3.0`。
+- 实时环境：web profile 经 Junction 直连本工作树，`cordis.patch.yml` 里
+  `unrestricted.config.enabled` 已置 `true`；2026-10-18 21:32 重启后
+  `include:unrestricted` 为 enabled/active，加载的是合并后的 node 半边。
