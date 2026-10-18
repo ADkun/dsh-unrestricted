@@ -4,9 +4,9 @@
 
 `dsh-unrestricted` は、**DeepSeek Harness (DSH)** 向けのプロンプト制限解除（アンレストリクト）プラグインです。システムプロンプト（System Prompt）に専用の制限解除ルールを注入することで、リバースエンジニアリング、ペネトレーションテスト、創作執筆、特殊技術手順における回答拒否や説教を解除し、完全で実行可能なコードと技術ソリューションを直接出力させます。
 
-プラグインは DSH のプロンプト構築メカニズムに深く適合しており、制限解除ルールを動的に注入しつつ、DSH のツール呼び出しプロトコル、計画モード（Plan Mode）、コード実行（PTC）、サブエージェントの実行ロジックを完全に維持します。
+プラグインは軽量な構成を維持し、既存のスイッチでルール全体を有効・無効にします。DSH 本来の画面レイアウト、ツール呼び出しプロトコル、計画モード（Plan Mode）、コード実行（PTC）、サブエージェントの実行ロジックを維持します。
 
-`0.2.3` は DSH `0.2.1-alpha.4`（`86a402200d`）で型チェック、ビルド、実ホスト統合検証を完了しています。新規セッションの `minimal` 切り替え、`headless`/`sdk` 対応、サブエージェントのプレビュー分離、クライアント状態同期を改善しました。`engines.dsh` は `>=0.2.0-rc.2 <0.2.2-0` で、ローカルのデスクトップ版 `0.2.0-rc.2` へのインストールを引き続きサポートします。今回デスクトップ UI は操作していません。
+`0.2.4` は、カスタムペルソナを持つ Minimal サブエージェントのプロンプト登録競合、公式の構造化出力指示の欠落、設定画面の並行リクエストによる古いプレビューの上書きや処理中状態の早期解除を修正します。既存のプロンプトルールとスイッチは変更しません。DSH `0.2.1-rc.2`（`687f282e86`）に対応し、`engines.dsh` は `>=0.2.0-rc.2 <0.2.2-0` です。デスクトップ版 `0.2.0-rc.2` へのインストールも引き続きサポートします。今回はローカルのデスクトップ用インストールのみ同期し、デスクトップ UI の操作・検証は行いません。
 
 公式の推論レベル設定とプラグイン索引は、本プラグインのモード別プロンプト組み立てを代替しません。推論レベルは公式のモデル設定で管理します。
 
@@ -82,7 +82,7 @@
 - **Standard / Cordis モード**：全ツール定義を維持しつつ、ペルソナ直後に制限解除ブロックを挿入します。
 - **PTC モード（コード実行専用）**：PTC では `run_code` のみが使用可能です。プラグインは `tools:ptc-only` に注記を追加し、Python/Node 内部で実行されるスクリプトや SDK ツール呼び出しにも制限解除を適用します。
 - **Plan Mode（計画モード）**：安全上の制約は「実行のタイミング」（承認前のファイル変更禁止）にのみ適用され、計画ドキュメント（Markdown）内では技術的な手順やコードを制限なくすべて展開するよう指示します。
-- **Minimal モード**：エージェントスコープでペルソナを適切に置換し、制限解除ルールを注入します。無効化時には自動的に元の最小ペルソナへ復帰します。
+- **Minimal モード**：現在のエージェントスコープでルールを注入し、サブエージェントのカスタムペルソナと公式の構造化出力指示を保持します。ペルソナの重複登録を避け、無効化時には元のプロンプトへ復帰します。
 - **その他の任意プリセット（ユーザー自作および今後の追加分）**：プリセット一覧は実行時に `agentPresets.list()` で動的に列挙されるため、プラグインの更新は不要です。4つの組み込み以外は汎用融合となり、ペルソナは原文のまま維持して1行のポインタを追加し、`plan:policy` / `tools:ptc-only` が存在すれば注記を加えたうえで制限解除ブロックを挿入します。**自作プリセットや今後追加されるプリセットもプラグインを変更せずに有効**になり、設定パネルには自動で行が増えます。
 - **サブエージェント**：派生したバックグラウンドタスクや構造化出力（`structured_output`）も自動的に制限解除設定を継承します。
 
@@ -112,17 +112,17 @@ CLI またはサーバー環境で `dsh web` を実行している場合。
 #### インストール
 ```sh
 # 指定バージョンのインストール
-dsh plugin --profile web add github:yexi-by/dsh-unrestricted#v0.2.3
+dsh plugin --profile web add github:ADkun/dsh-unrestricted#v0.2.4
 
 # または master 最新コードのインストール
-dsh plugin --profile web add github:yexi-by/dsh-unrestricted
+dsh plugin --profile web add github:ADkun/dsh-unrestricted
 ```
 インストール後に `dsh web` を再起動し、下記の使用方法に従ってプラグインと機能スイッチの両方をオンにします。
 
 #### アップデート
 ```sh
 dsh plugin --profile web remove dsh-unrestricted
-dsh plugin --profile web add github:yexi-by/dsh-unrestricted#新バージョン
+dsh plugin --profile web add github:ADkun/dsh-unrestricted#新バージョン
 ```
 更新後に `dsh web` を再起動します。
 
@@ -149,7 +149,7 @@ Windows の標準パス：
 1. デスクトップアプリを完全に終了します。
 2. PowerShell 等で以下を実行します：
    ```powershell
-   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:yexi-by/dsh-unrestricted#v0.2.3
+   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:ADkun/dsh-unrestricted#v0.2.4
    ```
 3. デスクトップアプリを起動し、下記の使用方法に従って設定を完了します。
 
@@ -158,7 +158,7 @@ Windows の標準パス：
 2. アンインストールと再インストールを実行します：
    ```powershell
    & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop remove dsh-unrestricted
-   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:yexi-by/dsh-unrestricted#新バージョン
+   & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:ADkun/dsh-unrestricted#新バージョン
    ```
 3. デスクトップアプリを再起動します。
 
@@ -213,7 +213,7 @@ dsh plugin --profile web add file:D:/work/dsh/plugin/unrestricted
 ## 開発とテスト
 
 ```sh
-git clone https://github.com/yexi-by/dsh-unrestricted.git
+git clone https://github.com/ADkun/dsh-unrestricted.git
 cd dsh-unrestricted
 pnpm install
 pnpm typecheck
