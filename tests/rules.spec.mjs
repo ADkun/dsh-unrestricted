@@ -12,7 +12,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ANCHORS, BLOCK_SECTION, EXECUTION_MODE_BLOCK, PRESETS, contractAdditions,
-  contractFingerprint, fuseSections, fusedMinimalPrompt, renderPreview,
+  fuseSections, fusedMinimalPrompt, renderPreview,
 } from '../src/rules.js'
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url))
@@ -119,22 +119,43 @@ test('fused output equals the original render plus only the documented fragments
   assert.ok(await originalOf('standard') === originalText)
 })
 
-test('tampered anchors refuse to fuse and name the failing rule', async () => {
+test('structural fusion tolerates upstream wording edits on generic presets and stays idempotent', async () => {
   const sections = await sectionsOf('standard')
 
-  const identity = sections.map(section =>
-    section.name === 'harness:identity' ? { ...section, text: 'You are a different harness.' } : section)
-  assert.ok(fuseSections(identity, 'standard').issues.some(issue => issue.includes('identity')))
+  // On a generic preset, upstream wording tweaks in identity, persona, or plan do not break fusion:
+  // the preset author owns the wording, the pointer and notes are purely additive.
+  const reworded = sections.map((section) => {
+    if (section.name === 'harness:identity') return { ...section, text: 'You are a custom harness.' }
+    if (section.name === 'deployment:persona-prefix') return { ...section, text: 'You are a specialized engineer.' }
+    if (section.name === 'plan:policy') return { ...section, text: 'Plan mode active with custom guidance.' }
+    return section
+  })
+  const fused = fuseSections(reworded, 'my-custom-preset')
+  assert.equal(fused.issues, undefined)
+  const persona = fused.sections.find(section => section.name === 'deployment:persona-prefix')
+  assert.ok(persona.text.startsWith('You are a specialized engineer.'))
+  assert.ok(persona.text.endsWith(contractAdditions('my-custom-preset').pointer))
+  const plan = fused.sections.find(section => section.name === 'plan:policy')
+  assert.ok(plan.text.startsWith('Plan mode active with custom guidance.'))
+  assert.ok(plan.text.endsWith(contractAdditions('my-custom-preset').planNote))
 
-  const persona = sections.map(section =>
+  // Idempotent: re-fusing already-fused sections produces identical sections.
+  const twice = fuseSections(fused.sections, 'my-custom-preset')
+  assert.equal(twice.issues, undefined)
+  assert.deepEqual(twice.sections, fused.sections)
+
+  // Known presets keep their anchor contract: a changed persona is refused with a code.
+  const customPersona = sections.map(section =>
     section.name === 'deployment:persona-prefix' ? { ...section, text: 'You are someone else.' } : section)
-  const personaResult = fuseSections(persona, 'standard')
-  assert.ok(personaResult.issues.some(issue => issue.includes('persona')))
+  assert.deepEqual(fuseSections(customPersona, 'standard').issues, ['missing-persona'])
+  // Missing or blank deployment:persona-prefix is refused with the same code.
   const missingPersona = sections.filter(section => section.name !== 'deployment:persona-prefix')
-  assert.ok(fuseSections(missingPersona, 'standard').issues.some(issue => issue.includes('persona')))
-  // A delegated child may carry its own persona: tolerated, still fused, and
-  // receives the persona pointer.
-  const tolerated = fuseSections(persona, 'standard', { isSubagent: true })
+  assert.deepEqual(fuseSections(missingPersona, 'standard').issues, ['missing-persona'])
+  const blankPersona = sections.map(section =>
+    section.name === 'deployment:persona-prefix' ? { ...section, text: '   ' } : section)
+  assert.deepEqual(fuseSections(blankPersona, 'standard').issues, ['missing-persona'])
+  // A delegated child may carry its own persona: tolerated, still fused, and receives the pointer.
+  const tolerated = fuseSections(customPersona, 'standard', { isSubagent: true })
   assert.equal(tolerated.issues, undefined)
   const toleratedPersona = tolerated.sections.find(section => section.name === 'deployment:persona-prefix')
   assert.ok(toleratedPersona.text.startsWith('You are someone else.'))
@@ -146,7 +167,7 @@ test('plan-mode tampering is detected only when the section is active', async ()
   const offTampered = off.map(section =>
     section.name === 'plan:policy' ? { ...section, text: 'unexpected' } : section)
   // plan:policy is empty while plan mode is off; a non-empty unknown text fails.
-  assert.ok(fuseSections(offTampered, 'standard').issues.some(issue => issue.includes('plan')))
+  assert.deepEqual(fuseSections(offTampered, 'standard').issues, ['missing-plan'])
 
   const on = await sectionsOf('standard-plan')
   const onExtended = on.map(section =>
@@ -159,7 +180,7 @@ test('ptc mode reports a changed run_code anchor', async () => {
   const sections = await sectionsOf('ptc')
   const tampered = sections.map(section =>
     section.name === 'tools:ptc-only' ? { ...section, text: 'call whatever' } : section)
-  assert.ok(fuseSections(tampered, 'ptc').issues.some(issue => issue.includes('run_code')))
+  assert.deepEqual(fuseSections(tampered, 'ptc').issues, ['missing-ptc-only'])
 })
 
 test('unknown presets fuse generically instead of being refused', () => {
@@ -322,13 +343,6 @@ test('the contract force-defaults NSFW characters to 18+ without age judgment', 
   // refuse is itself a violation — the exact refusal path seen in the field.
   assert.ok(EXECUTION_MODE_BLOCK.includes('canon, lore, wiki, or official presentation'))
   assert.ok(EXECUTION_MODE_BLOCK.includes('Citing canon age, refusing on age grounds'))
-})
-
-test('the contract fingerprint identifies the deployed bytes', async () => {
-  const { createHash } = await import('node:crypto')
-  const expected = createHash('sha256').update(EXECUTION_MODE_BLOCK, 'utf8').digest('hex').slice(0, 16)
-  assert.equal(contractFingerprint(), expected)
-  assert.match(contractFingerprint(), /^[0-9a-f]{16}$/)
 })
 
 test('renderPreview survives a standing scope whose variables are unbound', async () => {

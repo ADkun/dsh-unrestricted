@@ -38,13 +38,13 @@ const KNOWN_LABELS: Readonly<Record<string, UnrestrictedLocaleKey>> = {
 /** Shipped order, so a roster read never reshuffles the four familiar rows. */
 const KNOWN_ORDER = ['standard', 'ptc', 'cordis', 'minimal']
 
-/** Known host issue strings mapped to localized dictionary keys. */
+/** Known host issue codes mapped to localized dictionary keys. */
 const ISSUE_LOCALE_KEYS: Readonly<Record<string, UnrestrictedLocaleKey>> = {
-  'harness identity opening changed': 'issueIdentity',
-  'preset persona changed': 'issuePersona',
-  'plan-mode section changed': 'issuePlan',
-  'ptc-mode run_code rule changed': 'issuePtcOnly',
-  'structured-output instruction changed': 'issueStructuredOutput',
+  'missing-identity': 'issueIdentity',
+  'missing-persona': 'issuePersona',
+  'missing-plan': 'issuePlan',
+  'missing-ptc-only': 'issuePtcOnly',
+  'missing-structured-output': 'issueStructuredOutput',
 }
 
 /** Locale key for one mode state. */
@@ -200,9 +200,6 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
           })}
         </ul>
         <h4 className="dsh-unrestricted-statusTitle">{t('preflightTitle')}</h4>
-        <p className="dsh-unrestricted-note">
-          {t('fingerprint')} <code className="dsh-unrestricted-fingerprint">{status?.contract ?? '—'}</code>
-        </p>
         <p className="dsh-unrestricted-note">{t('fingerprintNote')}</p>
         <p className="dsh-unrestricted-note">{t('subagentNote')}</p>
         <p className="dsh-unrestricted-note">{t('scopeNote')}</p>
