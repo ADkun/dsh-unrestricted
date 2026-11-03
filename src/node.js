@@ -1,17 +1,18 @@
 /**
  * dsh-unrestricted host half: fuses the unrestricted execution mode into each
- * preset's ORIGINAL system prompt at assembly time.
+ * preset's ORIGINAL system prompt at assembly time and exposes read-only previews.
  *
  * Mechanism (public interfaces only):
  * - A root `system-prompt/assemble` waterfall listener receives every agent's
  *   assembly (unscoped listeners pass the dsh-scope filter). When enabled, it
- *   verifies the anchors of the agent's preset against the live sections and
- *   returns the same section list with the persona extended in place, the
- *   execution-mode section inserted behind the persona, and boundary notes
- *   appended to the plan / PTC-only / structured-output sections. Tools,
- *   contexts, and variables pass through untouched; when disabled the
- *   listener returns `next()` verbatim, so the prompt is byte-identical to
- *   the unmodified harness.
+ *   fuses the preset's sections structurally: extending `deployment:persona-prefix`
+ *   in place, inserting the `unrestricted:execution-mode` section right after the
+ *   persona, and appending boundary notes to any present `plan:policy`,
+ *   `tools:ptc-only`, or `tool:structured_output` sections. Known presets keep
+ *   their anchor contract; every other preset id (a user-authored preset, or one
+ *   added after this build) fuses generically. Tools, contexts, and variables
+ *   pass through untouched; when disabled the listener returns `next()`
+ *   verbatim, so the prompt is byte-identical to the unmodified harness.
  * - `minimal` registers its persona with `complete: true`, which the registry
  *   restores AFTER the waterfall, so waterfall edits cannot reach it. For
  *   minimal agents (joined, switched via `agent-preset/selected`, or later
@@ -23,8 +24,7 @@
  *   (`ptc` when `tools:ptc-only` is present, otherwise `standard`) and fuses
  *   their assemblies directly.
  * - Anchor failures (startup standing-scope check or any live assembly) leave
- *   that prompt unchanged and show the failed current-master invariant in the
- *   settings card.
+ *   that prompt unchanged and surface the issue codes in the settings card.
  *
  * The toggle lives in the `unrestricted` settings namespace (persisted to
  * $DSH_HOME/profiles/web/cordis.patch.yml). Switching affects the NEXT assembly of any live
@@ -32,7 +32,7 @@
  */
 import { loadHost, readEnabled } from './host.js'
 import {
-  ANCHORS, PRESETS, contractFingerprint, fuseSections, fusedMinimalPrompt, isKnownPreset, renderPreview,
+  ANCHORS, PRESETS, fuseSections, fusedMinimalPrompt, isKnownPreset, renderPreview,
 } from './rules.js'
 
 // Host packages are resolved through the running DSH entry, never through this
@@ -63,6 +63,9 @@ const renderPrompt = systemPromptModule?.renderPrompt ?? fallbackRender
 
 /** Cordis plugin name used by Loader diagnostics. */
 export const name = 'dsh-unrestricted'
+
+/** Current plugin package version. */
+export const PLUGIN_VERSION = '0.3.1'
 
 /** Services required by this plugin (all base-backed profiles provide these). */
 export const inject = ['settings', 'systemPrompt', 'loader']
@@ -96,18 +99,18 @@ export function apply(ctx, config) {
 
   const state = {
     enabled: readEnabled(config),
-    /** presetId -> issue strings; a preset with an empty list is verified. */
+    /** presetId -> issue codes; a preset with an empty list is verified. */
     startup: new Map(),
     /** presetId -> in-flight startup check. */
     checking: new Map(),
-    /** presetId -> issue strings observed on live assemblies. */
+    /** presetId -> issue codes observed on live assemblies. */
     runtime: new Map(),
     /** Agent -> section disposer for minimal persona shadows. */
     shadows: new Map(),
-    /** 已由调用方在 agent scope 注册 persona 的 Minimal agent。 */
+    /** Minimal agents whose persona was already registered at agent scope by caller. */
     customMinimal: new WeakSet(),
     /** Fused minimal prompt, computed only after the minimal anchors verify. */
-    fusedMinimal: null,
+    fusedMinimal: fusedMinimalPrompt(),
     /** presetId -> last successfully fused top-level live assembly (the deploy preview). */
     fusedText: new Map(),
   }
@@ -119,8 +122,8 @@ export function apply(ctx, config) {
 
   /**
    * Read the standing assembly of a preset using the registry's scope lease
-   * (or a temporary mounted scope fallback). In rosterless profiles, assemble
-   * the global host layer directly.
+   * (DSH >= 0.2.1) or a temporary mounted scope fallback. In rosterless
+   * profiles, assemble the global host layer directly.
    */
   async function presetAssembly(presetId) {
     // 预设声明与本插件是并列 Loader 条目；服务可用时，声明仍可能尚未注册。
@@ -156,7 +159,7 @@ export function apply(ctx, config) {
    * Enumerate every preset this profile can run, so the card and the checks
    * cover presets added after this build (a user-authored preset, or any
    * future one) instead of the four ids compiled into {@link PRESETS}.
-   * @returns rows of `{ id, name, known }`, the shipped ids first.
+   * @returns rows of `{ id, name, known, broken }`, the shipped ids first.
    */
   async function presetRoster() {
     const rows = new Map()
@@ -247,27 +250,6 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Resolve the composed preset id for a live agent, or infer `ptc`/`standard`
-   * when running in a rosterless profile (e.g. headless / sdk).
-   */
-  function resolveAgentPreset(agent, sections) {
-    const presets = ctx.get('agentPresets')
-    if (presets !== undefined) {
-      try {
-        return presets.composedPreset(agent.ctx)
-      } catch {
-        return undefined // scope chain not readable; leave the agent untouched
-      }
-    }
-    if (sections !== undefined) {
-      return sections.some(s => s.name === 'tools:ptc-only' && s.text.trim() !== '')
-        ? 'ptc'
-        : 'standard'
-    }
-    return undefined
-  }
-
-  /**
    * Synchronize a minimal agent's complete persona shadow with its current
    * preset and toggle state. If the agent is no longer on `minimal`, any stale
    * shadow from an earlier blank-session preset selection is disposed.
@@ -331,10 +313,11 @@ export function apply(ctx, config) {
 
   function onDisable() {
     clearShadows()
+    state.runtime.clear()
     state.fusedText.clear()
   }
 
-  /** Current card view: toggle and per-preset state (roster-driven). */
+  /** Current card view: toggle, version, and per-preset state (roster-driven). */
   async function statusPayload() {
     const modes = {}
     for (const row of await presetRoster()) {
@@ -351,10 +334,14 @@ export function apply(ctx, config) {
         broken: row.broken,
       }
     }
-    return { enabled: state.enabled, contract: contractFingerprint(), modes }
+    return {
+      enabled: state.enabled,
+      version: PLUGIN_VERSION,
+      modes,
+    }
   }
 
-  /** One line-count/byte summary so the preview does not ship a whole prompt. */
+  /** One line-count/byte summary so the preview reports size metadata. */
   function summarize(text) {
     return {
       text,
@@ -364,12 +351,9 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Variables to bind in a standing-scope preview. The standing scope carries
-   * no agent, so its `{{model}}` / `{{cwd}}` providers resolve to nothing; when
-   * a live agent exists, borrow its route and working directory so the card
-   * reads a realistic prompt instead of raw slots. Absent any agent the slots
-   * stay literal, which the card renders as-is.
-   * @returns partial variable overrides for the preview assembly.
+   * Variables to bind in a standing-scope preview. When a live agent exists,
+   * borrow its route and working directory so the card reads a realistic
+   * prompt instead of raw slots.
    */
   function previewVariables() {
     const variables = {}
@@ -389,24 +373,15 @@ export function apply(ctx, config) {
 
   /**
    * Build the deploy preview for ONE preset from the same assembly path the
-   * live fusion uses. This is the "look before you switch" surface: exact
-   * fused prompt text, its size, and the contract fingerprint it embeds.
-   * Read-only — it never mutates prompt state.
-   * @param presetId - preset id from the card.
-   * @returns the preview payload, or a message naming why none is available.
+   * live fusion uses. Read-only — never mutates prompt state.
    */
   async function previewFor(presetId) {
-    const contract = contractFingerprint()
     if (typeof presetId !== 'string' || presetId === '') {
-      return { presetId, contract, available: false, reason: 'missing preset id' }
+      return { presetId, available: false, errorCode: 'unsupported-preset', reason: 'missing preset id' }
     }
-    // Best source first: the exact bytes a top-level live agent just received.
-    // Only when no top-level agent has assembled this preset yet does the
-    // preview fall back to the standing scope, which carries no agent-bound
-    // sections and leaves {{model}} / {{cwd}} as literal slots.
     const cached = state.fusedText.get(presetId)
     if (cached !== undefined) {
-      return { presetId, contract, available: true, source: 'live', ...summarize(cached) }
+      return { presetId, available: true, source: 'live', ...summarize(cached) }
     }
     try {
       const assembly = await presetAssembly(presetId)
@@ -414,13 +389,23 @@ export function apply(ctx, config) {
         ? { sections: [{ name: 'deployment:persona-prefix', text: fusedMinimalPrompt() }] }
         : fuseSections(assembly.sections, presetId)
       if (fused.issues !== undefined) {
-        return { presetId, contract, available: false, reason: fused.issues.join('; ') }
+        return {
+          presetId,
+          available: false,
+          errorCode: fused.issues.includes('missing-persona') ? 'missing-persona' : 'preview-failed',
+          reason: fused.issues.join('; '),
+        }
       }
       const variables = { ...assembly.variables, ...previewVariables() }
       const text = renderPreview({ ...assembly, sections: fused.sections, variables }, renderPrompt)
-      return { presetId, contract, available: true, source: 'standing', ...summarize(text) }
+      return { presetId, available: true, source: 'standing', ...summarize(text) }
     } catch (error) {
-      return { presetId, contract, available: false, reason: `preview probe failed: ${messageOf(error)}` }
+      return {
+        presetId,
+        available: false,
+        errorCode: 'preview-failed',
+        reason: messageOf(error),
+      }
     }
   }
 
@@ -448,7 +433,14 @@ export function apply(ctx, config) {
         return ok(await statusPayload())
       }
       default:
-        return { ok: false, error: { code: 'internal', message: `dsh-unrestricted: unknown endpoint ${JSON.stringify(endpoint)}`, details: {} } }
+        return {
+          ok: false,
+          error: {
+            code: 'internal',
+            message: `dsh-unrestricted: unknown endpoint ${JSON.stringify(endpoint)}`,
+            details: {},
+          },
+        }
     }
   }
 
@@ -481,6 +473,7 @@ export function apply(ctx, config) {
           state.runtime.set('minimal', fused.issues)
           return original
         }
+        state.runtime.delete('minimal')
         return { ...original, sections: fused.sections }
       }
       return original
@@ -498,6 +491,7 @@ export function apply(ctx, config) {
       state.runtime.set(presetId, fused.issues)
       return original
     }
+    state.runtime.delete(presetId)
     // Keep the deployed top-level fusion available for the card's preview.
     // Subagents may carry custom personas or restricted sections, so they do
     // not overwrite the preset's top-level preview cache.
@@ -549,7 +543,7 @@ export function apply(ctx, config) {
     }
   }, 'dsh-unrestricted: toggle lifecycle')
 
-  // Web 状态通道由官方 Connection 认证；headless 组合无需提供 connection 服务。
+  // Web/Desktop 状态通道由官方 Connection 认证；headless 组合无需提供 connection 服务。
   ctx.inject(['connection'], (connectionCtx) => {
     const disposeRpc = connectionCtx.connection.rpc.handle(RPC_CHANNEL, handleRpc)
     return async () => {

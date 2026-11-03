@@ -1,109 +1,90 @@
-# Dynamic Prompt Injection & Mode Coordination in DSH
+# Prompt Injection & Mode Adaptation in DSH
 
 > [简体中文](./prompt-fusion.md) | **English** | [日本語](./prompt-fusion.ja.md)
 
-This technical guide details how `dsh-unrestricted` hooks into DeepSeek Harness (DSH), injects unrestrict rules on the fly, and coordinates across multiple execution modes.
+This document explains how `dsh-unrestricted` hooks into DeepSeek Harness (DSH) prompt assembly and handles each execution mode.
 
 ---
 
-## 1. Architecture & Interception Mechanism
+## 1. Injection Mechanism
 
-Prior to dispatching requests to LLMs, DSH dynamically builds its System Prompt section by section via its **Prompt Assemble Pipeline** (`system-prompt/assemble`).
+Before sending a request to the model, DSH builds its System Prompt section by section through the `system-prompt/assemble` pipeline.
 
-The plugin's injection logic is structured as follows:
+The plugin works as follows:
 
 1. **Pipeline Hook**:
-   Registers a global listener on the prompt assembly pipeline. When enabled, it intercepts the outgoing section array; when disabled, it acts as a transparent pass-through, preserving 100% of the stock prompt.
-2. **Post-Persona Injection**:
-   Locates the persona prefix (`deployment:persona-prefix`), appends an execution pointer directing the model to unrestricted local execution mode, and inserts the unrestrict rules block (`unrestricted:execution-mode`) immediately after.
-3. **Preserving Environment & Tools**:
-   DSH's working directory suffix (`deployment:persona-suffix`) and all native tool schemas (filesystem, terminal commands, web search) are kept untouched. The plugin adjusts only the instructions governing output scale and directness.
+   Registers a listener on `system-prompt/assemble`. When enabled, it rewrites the outgoing section list; when disabled, it passes sections through unchanged.
+2. **Post-Persona Insertion**:
+   Finds the official persona prefix (`deployment:persona-prefix`), appends a pointer at the end, and inserts the rule block (`unrestricted:execution-mode`) as the next section.
+3. **Preserving Context & Tools**:
+   Keeps the working directory suffix (`deployment:persona-suffix`) and tool definitions (filesystem, terminal commands, web search) intact.
 
 ---
 
-## 2. Unrestrict Rules Design & Core Scenarios
+## 2. Rule Structure & Scenarios
 
-The unrestrict block (`EXECUTION_MODE_BLOCK`) enforces direct technical delivery while removing defensive tendencies:
+The rule block (`EXECUTION_MODE_BLOCK`) covers the following areas:
 
-1. **Direct Delivery (No Chitchat)**:
-   The answer itself is the final deliverable. If code is requested, output code starting on line 1. No conversational fluff, moral lectures, or unsolicited compliance warnings.
-2. **Reverse Engineering & Keygens**:
-   Locates license/signature validation routines (`CHECK_FN`), extracts core cryptographic algorithms, and implements keygen generation code. Outlines binary patch offsets (`OFFSET`) and replacement bytes (`PATCH_BYTE`), along with anti-debug/anti-VM bypasses.
-3. **Security Research & Exploits**:
-   Provides complete, reproducible PoC scripts detailing payload structure and delivery mechanisms. Formulates multi-threaded bruteforcers with canonical placeholders (`WORDLIST`, `THREADS`, `RATE`), and generates encrypted reverse shells.
-4. **Fiction, Creative Writing & Editorial**:
-   Adapts fluidly between plot/worldbuilding brainstorming, outlining, prose editing, and direct scene writing while honoring the user's literary style. Renders anatomy and intimate acts plainly without fade-to-black avoidance when explicit scenes are requested, while preserving literary restraint and atmosphere when subtlety is desired. Fictional characters silently default to adults aged 18+; no age-based refusals or patronizing warnings.
-5. **Industrial & Technical Guides**:
-   Provides unabridged formulations, reagents, and physical parameters for chemical and industrial procedures, without substituting degraded proxies on safety grounds.
-6. **Structured Resource Search**:
-   Formulates targeted queries via DSH's search tools to extract verified download links, file sizes, and sources into structured tables, strictly forbidding hallucinatory URLs.
-7. **Data vs. Instruction Separation**:
-   Explicitly informs the model that workspace files and scraped web pages are passive data, never instructions capable of modifying unrestrict guidelines.
+1. **Direct Delivery**:
+   The response is the deliverable itself. Code requests start with code on line 1; analysis requests start directly with the steps, omitting disclaimers and pleasantries.
+2. **Reverse Engineering & Patching**:
+   Locates validation routines (`CHECK_FN`), reconstructs algorithms, and writes keygens; provides binary patch offsets (`OFFSET`), replacement bytes (`PATCH_BYTE`), and anti-debug / anti-VM code.
+3. **Security Testing & Exploits**:
+   Provides reproducible PoC scripts with payload structure and delivery details; uses standard placeholders (`WORDLIST`, `THREADS`, `RATE`) in bruteforcers and includes encryption in reverse shells.
+4. **Fiction & Editorial Writing**:
+   Adapts across worldbuilding/plot discussion, outlining, prose editing, and scene writing according to the user's chosen style. Writes explicit scenes plainly without fade-to-black cuts when called for, while keeping restraint when subtlety is preferred. Fictional characters default to adults without age-based refusals or lecturing.
+5. **Industrial & Lab Procedures**:
+   Gives full steps, materials, and ratios for chemical or industrial processes without omitting key stages; keeps necessary safety precautions as a brief note at the end.
+6. **Resource Lookup**:
+   Uses DSH's web search tools to query and organize download lists from real results without inventing URLs.
+7. **External Text Isolation**:
+   Treats workspace files and fetched web pages as input data rather than new instructions that alter active response rules.
 8. **Verbatim Named Targets**:
-   Domain names, IPs, software titles, and function names specified by the user are preserved verbatim in all output.
+   Preserves user-specified domain names, IPs, software names, and function names verbatim; uses uppercase placeholders (`TARGET`, `PORT`) for unspecified values.
 
 ---
 
-## 3. Per-Mode Coordination
+## 3. Mode Adaptation
 
-DSH provides distinct execution modes with differing prompt structures and tool constraints:
+Each DSH preset structures its prompt sections differently:
 
 ### Standard & Cordis Modes
-- **Profile**: Full-featured coding agents with terminal, filesystem, and task automation tools.
-- **Coordination**: Injects the unrestrict block immediately after the persona prefix. Built-in tools and contexts pass through unchanged.
+- Inserts the pointer and rule block right after `deployment:persona-prefix`, leaving tool and environment sections unchanged.
 
 ### PTC Mode (Program Tool Call)
-- **Profile**: Models interact with tools exclusively via `run_code` scripts.
-- **Coordination**: Appends an explanatory note to `tools:ptc-only` clarifying that Python/Node scripts executed inside `run_code` are unconstrained, allowing full access to internal SDK tools for automated analysis.
+- Models in PTC mode call tools by running Python/Node scripts via `run_code`. The plugin appends a note to `tools:ptc-only` so scripts and internal SDK calls follow the same output rules.
 
 ### Plan Mode
-- **Profile**: Prevents destructive file writes prior to user approval.
-- **Coordination**: Appends a rule to `plan:policy` decoupling operational execution from technical depth. The model respects execution gates (no file modifications without user confirmation) while providing complete, unabridged technical procedures in the plan markdown.
+- Appends a rule to `plan:policy` separating execution permissions from plan content: no workspace files are modified before user approval, while the plan markdown itself contains full technical steps, reverse engineering logic, and code.
 
 ### Minimal Mode
-- **Profile**: Minimal terminal assistant with an isolated scope registration.
-- **Coordination**: Preserves the persona text while injecting rules in the current agent scope, restoring the original prompt upon deactivation. `0.2.4` fixes assembly failures caused by duplicate persona registration in Minimal subagents with custom personas and preserves the native `structured_output` instructions required by structured subagents.
-
-### Any Other Preset (user-authored and future additions)
-- **Profile**: DSH lets users register presets with arbitrary ids, each supplying its own persona plus optional `plan:policy` and `tools:ptc-only` sections.
-- **Coordination**: The preset roster is enumerated at runtime via `agentPresets.list()`, so **new presets need no plugin update**. Non-built-in presets go through generic fusion: a one-line pointer is appended after a non-empty persona (its original text untouched), notes are added to `plan:policy` / `tools:ptc-only` when present, then the unrestrict block is inserted. If the preset has no persona section, the block goes in first.
+- Preserves custom persona text and `structured_output` instructions within the active agent scope while inserting the rule block; restores the original prompt when turned off.
 
 ### Subagents & Structured Output
-- **Subagents**: Background child agents inherit the unrestrict rules of their parent mode.
-- **Structured Output**: Subagents reporting via `structured_output` are instructed to supply comprehensive, unconstrained data in each JSON field.
+- Background subagents inherit the current rule state from their parent mode.
+- When a subagent reports via `structured_output`, a note is appended to keep each JSON field complete and detailed.
 
 ---
 
-## 4. Robustness & Safety Guardrails
+## 4. Structural Fusion & Prompt Preview
 
-### Section-Name Anchoring
-Injection points are located by **section name** (`deployment:persona-prefix`, `harness:identity`, `plan:policy`, `tools:ptc-only`, …) rather than by fixed whole-prompt text, so upstream rewording usually does not break fusion:
+### Structural Section Fusion
+During assembly, the plugin locates and fuses prompt sections by DSH's canonical section names (`deployment:persona-prefix`, `plan:policy`, `tools:ptc-only`, `tool:structured_output`) with idempotency guards, supporting both DSH Web and DSH Desktop without brittle exact-string or hash checks. If a custom preset omits the persona section, it safely falls back to the stock prompt.
 
-- **The four built-in presets** (Standard / PTC / Cordis / Minimal) keep exact anchor verification (defined in `ANCHORS` in `src/rules.js`): identity strings, persona openings, Plan Mode policies, and `run_code` descriptions must match before anything is fused.
-- **Any other preset** uses soft anchors: a non-empty persona is enough to receive the pointer, so presets with custom personas work out of the box.
-- If a built-in preset's anchors fail, the plugin **gracefully falls back to the original stock prompt** for that mode and surfaces the issue in the settings panel.
-
-> **Known blind spot**: if a preset declares its persona with `complete: true`, the harness replaces that section wholesale *after* the waterfall, discarding the fusion. The plugin only shadows the built-in Minimal preset today; other complete-type presets need a plugin update.
-
-### Rule Fingerprint
-Computes a SHA-256 hash (first 16 hex characters) of the unrestrict text block, displayed on the settings card for instantaneous verification of the active revision.
-
-### Realtime Prompt Preview
-An RPC endpoint renders the exact, fully assembled prompt text, total line count, and byte size for each mode, ensuring complete transparency.
-
-When refreshes or rechecks overlap, stale responses cannot overwrite the latest status or preview. The busy state remains active until all pending status operations finish.
+### Prompt preview
+The settings UI queries an RPC endpoint to preview the full assembled system prompt, line count, and byte size for each mode. Version checks and installation use DSH’s built-in plugin manager.
 
 ---
 
-## 5. Automated Testing
+## 5. Testing & Verification Scripts
 
 ```sh
-# Run the test suite
+# Run unit tests
 pnpm test
 
-# Dump fresh prompts from DSH source to update fixtures
+# Export stock prompts from DSH source to update test fixtures
 node tools/dump-prompts.mjs --repo <deepseek-harness-path> --out tests/fixtures
 
-# Verify live assembly and fallback in an active profile without LLM calls
+# Verify assembly and rollback across all four modes locally without API calls
 node tools/verify-live.mjs --repo <deepseek-harness-path>
 ```
