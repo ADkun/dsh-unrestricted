@@ -250,6 +250,27 @@ export function apply(ctx, config) {
   }
 
   /**
+   * Resolve the composed preset id for a live agent, or infer `ptc`/`standard`
+   * when running in a rosterless profile (e.g. headless / sdk).
+   */
+  function resolveAgentPreset(agent, sections) {
+    const presets = ctx.get('agentPresets')
+    if (presets !== undefined) {
+      try {
+        return presets.composedPreset(agent.ctx)
+      } catch {
+        return undefined // scope chain not readable; leave the agent untouched
+      }
+    }
+    if (sections !== undefined) {
+      return sections.some(s => s.name === 'tools:ptc-only' && s.text.trim() !== '')
+        ? 'ptc'
+        : 'standard'
+    }
+    return undefined
+  }
+
+  /**
    * Synchronize a minimal agent's complete persona shadow with its current
    * preset and toggle state. If the agent is no longer on `minimal`, any stale
    * shadow from an earlier blank-session preset selection is disposed.
