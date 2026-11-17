@@ -66,7 +66,7 @@ const renderPrompt = systemPromptModule?.renderPrompt ?? fallbackRender
 export const name = 'dsh-unrestricted'
 
 /** Current plugin package version. */
-export const PLUGIN_VERSION = '0.3.1'
+export const PLUGIN_VERSION = '0.3.2'
 
 /** Services required by this plugin (all base-backed profiles provide these). */
 export const inject = ['settings', 'systemPrompt', 'loader']
