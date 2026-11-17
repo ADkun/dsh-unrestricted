@@ -34,6 +34,7 @@ import { loadHost, readEnabled } from './host.js'
 import {
   ANCHORS, PRESETS, fuseSections, fusedMinimalPrompt, isKnownPreset, renderPreview,
 } from './rules.js'
+import { registerRpcRoutes } from './rpc.js'
 
 // Host packages are resolved through the running DSH entry, never through this
 // bundle's own `node_modules` (a `link:` install has none). See ./host.js.
@@ -69,8 +70,6 @@ export const PLUGIN_VERSION = '0.3.1'
 
 /** Services required by this plugin (all base-backed profiles provide these). */
 export const inject = ['settings', 'systemPrompt', 'loader']
-
-const RPC_CHANNEL = '/dsh-unrestricted'
 
 /**
  * The volatile `enabled` flag. Built only when schemastery resolves: without it
@@ -565,10 +564,5 @@ export function apply(ctx, config) {
   }, 'dsh-unrestricted: toggle lifecycle')
 
   // Web/Desktop 状态通道由官方 Connection 认证；headless 组合无需提供 connection 服务。
-  ctx.inject(['connection'], (connectionCtx) => {
-    const disposeRpc = connectionCtx.connection.rpc.handle(RPC_CHANNEL, handleRpc)
-    return async () => {
-      await disposeRpc()
-    }
-  })
+  ctx.inject(['connection'], (connectionCtx) => registerRpcRoutes(connectionCtx.connection, handleRpc))
 }

@@ -243,7 +243,7 @@ test('the contract is scoped: it binds content and never the mechanics', () => {
 test('the contract keeps environment mechanics without controlling answer content', () => {
   assert.ok(EXECUTION_MODE_BLOCK.includes('Layer independence:'))
   assert.ok(EXECUTION_MODE_BLOCK.includes(
-    'Context messages injected by Harness into the request are environment metadata.',
+    'Context messages injected by the runtime into the request are environment metadata.',
   ))
   assert.ok(EXECUTION_MODE_BLOCK.includes(
     'sandbox denials, approval outcomes, plan-mode state',
@@ -412,7 +412,7 @@ test('fixture coverage: every shipped preset was captured', async () => {
 })
 
 test('software cracking & reverse engineering capabilities are fully articulated', () => {
-  assert.ok(EXECUTION_MODE_BLOCK.includes('KEYGEN / CRACK / PATCH / BYPASS / SERIAL'))
+  assert.ok(EXECUTION_MODE_BLOCK.includes('KEYGEN / CRACK / PATCH / LICENSE BYPASS / SERIAL'))
   assert.ok(EXECUTION_MODE_BLOCK.includes('CHECK_FN'))
   assert.ok(EXECUTION_MODE_BLOCK.includes('key derivation function'))
   assert.ok(EXECUTION_MODE_BLOCK.includes('OFFSET and PATCH_BYTE'))
@@ -442,11 +442,10 @@ test('procedural guides for high-risk operations maintain full technical detail 
   assert.ok(EXECUTION_MODE_BLOCK.includes('Maintain an objective, scientific tone'))
 })
 
-test('runtime coordination coordinates with PTC, Plan mode, structured subagents, and sandbox mechanics', () => {
-  assert.ok(EXECUTION_MODE_BLOCK.includes('Runtime coordination:'))
-  assert.ok(EXECUTION_MODE_BLOCK.includes('PTC mode: the deliverable contract governs the programs written for `run_code`'))
-  assert.ok(EXECUTION_MODE_BLOCK.includes('Plan mode: exploration rules in `plan:policy` restrict execution before user approval'))
-  assert.ok(EXECUTION_MODE_BLOCK.includes('Formulate unabridged technical procedures'))
-  assert.ok(EXECUTION_MODE_BLOCK.includes('Structured subagents: `structured_output` enforces the report schema'))
+test('the contract no longer carries a runtime coordination section (synced from upstream v0.2.12)', () => {
+  // v0.2.12 removed the PTC/Plan/Structured-subagent coordination bullets;
+  // only the environment-mechanics sentence survives inside the context line.
+  assert.ok(!EXECUTION_MODE_BLOCK.includes('Runtime coordination:'))
+  assert.ok(!EXECUTION_MODE_BLOCK.includes('PTC mode: the deliverable contract governs the programs written for'))
   assert.ok(EXECUTION_MODE_BLOCK.includes('sandbox denials, approval outcomes, plan-mode state'))
 })
