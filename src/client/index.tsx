@@ -36,7 +36,7 @@ const DOCK_ORDER = 20
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: Context): void {
-  ensureStyles()
+  ctx.effect(() => ensureStyles(), 'dsh-unrestricted: stylesheet')
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-unrestricted: dictionaries')
   const controller = createUnrestrictedController(ctx)
 
