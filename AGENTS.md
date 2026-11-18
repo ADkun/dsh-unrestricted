@@ -14,7 +14,7 @@ DeepSeek Harness 的「破限模式」插件：一个开关，把执行规则融
 
 | 目的 | 命令 | 期望结果 |
 | --- | --- | --- |
-| 运行单元测试 | `pnpm test` | `pass 37` / `fail 0` |
+| 运行单元测试 | `pnpm test` | `pass 42` / `fail 0` |
 | 构建客户端产物 | `pnpm build` | 生成 `lib/client.js` 与 `lib/client.js.map`，无报错 |
 | 类型检查 | `pnpm typecheck` | 仅 3 条基线报错（见下），无新增 |
 | 重抓提示词夹具 | `node tools/dump-prompts.mjs --repo <DSH 源码树> --out tests/fixtures` | 重写 `tests/fixtures/*` |
@@ -73,7 +73,7 @@ DeepSeek Harness 的「破限模式」插件：一个开关，把执行规则融
 
 | 检查项 | 载体 | 期望结果 |
 | --- | --- | --- |
-| 规则与契约测试 | 机检 | `pnpm test` 退出码 0，`pass 37 fail 0` |
+| 规则与契约测试 | 机检 | `pnpm test` 退出码 0，`pass 42 fail 0` |
 | 类型不回归 | 机检 | `pnpm typecheck` 新增报错数 = 0（基线 3 条） |
 | 产物可构建 | 机检 | `pnpm build` 退出码 0，`lib/client.js` 更新 |
 | 融合不越界 | 评 | 对照 [design.md](docs/design.md) 非功能红线逐条核对 |

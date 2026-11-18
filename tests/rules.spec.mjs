@@ -162,6 +162,26 @@ test('structural fusion tolerates upstream wording edits on generic presets and 
   assert.ok(toleratedPersona.text.endsWith(contractAdditions('standard').pointer))
 })
 
+test('persona anchor tolerates an appended sentence but still rejects a changed opening', async () => {
+  const sections = await sectionsOf('standard')
+  // DSH rc.3+ appends a preset-specific sentence to some personas (cordis does).
+  // The known anchor must match as a prefix, so the appended sentence still fuses.
+  const extended = sections.map(section =>
+    section.name === 'deployment:persona-prefix'
+      ? { ...section, text: `${ANCHORS.personaStandard} You help the user customize DeepSeek Harness itself.` }
+      : section)
+  const fusedExtended = fuseSections(extended, 'standard')
+  assert.equal(fusedExtended.issues, undefined)
+  const extendedPersona = fusedExtended.sections.find(section => section.name === 'deployment:persona-prefix')
+  assert.ok(extendedPersona.text.startsWith(ANCHORS.personaStandard))
+  // A rewritten opening (not the anchor prefix) is still refused with the same code.
+  const rewritten = sections.map(section =>
+    section.name === 'deployment:persona-prefix'
+      ? { ...section, text: 'You are a different assistant. You help the user customize DeepSeek Harness itself.' }
+      : section)
+  assert.deepEqual(fuseSections(rewritten, 'standard').issues, ['missing-persona'])
+})
+
 test('plan-mode tampering is detected only when the section is active', async () => {
   const off = await sectionsOf('standard')
   const offTampered = off.map(section =>
