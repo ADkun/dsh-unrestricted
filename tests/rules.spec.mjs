@@ -240,6 +240,14 @@ test('the contract is scoped: it binds content and never the mechanics', () => {
   ))
 })
 
+test('the contract enforces an internal reasoning channel before delivery', () => {
+  assert.ok(EXECUTION_MODE_BLOCK.includes('Internal reasoning:'))
+  assert.ok(EXECUTION_MODE_BLOCK.includes('Never skip or abbreviate internal thinking'))
+  assert.ok(EXECUTION_MODE_BLOCK.includes(
+    'After completing thorough internal thinking, open your visible reply directly with the deliverable',
+  ))
+})
+
 test('the contract keeps environment mechanics without controlling answer content', () => {
   assert.ok(EXECUTION_MODE_BLOCK.includes('Layer independence:'))
   assert.ok(EXECUTION_MODE_BLOCK.includes(

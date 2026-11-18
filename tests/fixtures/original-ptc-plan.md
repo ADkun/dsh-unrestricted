@@ -43,7 +43,7 @@ Only create or modify scheduled tasks at the user's explicit request; prior expl
 
 Start independent delegations with `subagent` or `subagent_fork` together in one assistant message and continue useful work while they run. When only waiting for their results remains, end your turn instead of sleeping or polling; the next result starts a new turn. Collect the subagent results required to complete the task before giving the user a final answer.
 
-Agents may use different working directories; changes to shared files affect other agents. Split parallel write work into disjoint file or directory scopes. Bash, formatters, code generators, and scripts can overwrite concurrent edits without conflict detection; coordinate their changes explicitly. The agent integrating the work must review the final diff and run relevant tests.
+Bash, formatters, code generators, and scripts can overwrite concurrent edits without conflict detection; coordinate their changes explicitly. The agent integrating the work must review the final diff and run relevant tests.
 
 ## Writing code for run_code
 
@@ -51,15 +51,19 @@ Agents may use different working directories; changes to shared files affect oth
 
 Inside the program:
 
-- Call tools as `await tools.name(args)` — quoted access for exotic names: `tools["my-tool"](args)`. Every call resolves to the tool's typed canonical JSON value. Tool arguments must be lossless JSON.
+- Call tools as `await tools.name(args)` — quoted access for exotic names: `tools["my-tool"](args)`. Every call resolves to its declared value, which may be an Image. Tool arguments must be lossless JSON.
 - A FAILED tool call rejects with `ToolCallError`, whose `toolName` identifies the failed tool and whose `message` is human-readable — `try/catch` it to handle and continue.
 - Independent read-only calls MAY overlap under `Promise.all` (safe calls run concurrently; mutating calls run alone, in submission order). Sequence dependent work with `await`.
-- Emit results with `return` and/or `console.log(...)`. Only what you print or return is program output. A successful tool result containing an image is attached after the run so you can inspect it on the next step; every other intermediate result stays out of the conversation, so extract just what you need.
+- Show selected values and images with `inspect(...values)`; every other intermediate result stays out of the conversation, so extract just what you need.
 
 Program-only SDK bindings:
 
 ```ts
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
+
+declare class Image { private constructor(); readonly attachmentId: string; readonly path: string; readonly width: number; readonly height: number; }
+
+declare function inspect(...values: unknown[]): void;
 
 interface ToolArgsMap {
   /** Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. An answer item with empty selected and no custom means the user skipped that question: continue without it, do not ask it again, and do not treat the skip as permission. */
@@ -128,11 +132,6 @@ interface ToolArgsMap {
     /** One glob filter for which files to search (e.g. "*.ts", "*.{js,jsx}"). Not a list; negation is not supported. */
     include?: string;
   } & Record<string, JsonValue>;
-  /** Ask a subagent to stop its current work. This call returns without waiting for it to stop. You can continue a local subagent's conversation later with send_message. External executions stop permanently and cannot receive follow-ups. Subagents it started will keep running. */
-  interrupt_agent: {
-    /** The name of an agent created under you: your direct child or a deeper descendant. */
-    agent: string;
-  } & Record<string, JsonValue>;
   /** Request cancellation of a running background job. */
   job_kill: {
     /** Job id returned by the tool that started the background work. */
@@ -153,12 +152,41 @@ interface ToolArgsMap {
   } & Record<string, JsonValue>;
   /** List your entire subagent tree: the root agent and all reachable continuable descendants, including yourself. Rows carry names, descriptions, and status. A descendant's name is its path from the root, such as reviewer/checker. You can message any other agent in the subagent tree. running means it is working; inactive means no turn is executing; it does not indicate task completion, success, or failure. corrupt, unsupported, or unavailable means this row's own descendants could not be read; the row itself is still a member you can message. While you remain active, you will be notified when a direct child finishes; there is no need to keep checking its status. Use send_message to continue the conversation. */
   list_agents: Record<string, JsonValue>;
-  /** Inspect the routes available for explicit subagent model selection. No arguments: authorized providers. `provider`: that provider's authorized models. `provider` + `model`: that model and its reasoning efforts. Query when choosing an explicit child route or reasoning effort. Omit optional fields rather than sending empty strings. */
+  /** Inspect the routes available for explicit subagent model selection. No arguments: authorized providers. `provider`: that provider's authorized models. `provider` + `model`: that model and its reasoning efforts. */
   list_subagent_models: {
-    /** Registered LLM provider id. */
+    /** Provider id from the no-argument listing. */
     provider?: string;
     /** Exact model id; requires provider. */
     model?: string;
+  } & Record<string, JsonValue>;
+  /** Convert a document to another format. Return a temporary file to copy to its destination with the shell. */
+  office_convert: {
+    /** Path to doc, docx, odt, xls, xlsx, ods, ppt, pptx, or odp; not modified. */
+    input: string;
+    /** Word: pdf, docx, odt, txt. Excel: pdf, xlsx, ods, csv. PowerPoint: pdf, pptx, odp. */
+    format: "pdf" | "docx" | "odt" | "txt" | "xlsx" | "ods" | "csv" | "pptx" | "odp";
+    /** Exact worksheet name for CSV only; required when the workbook has several sheets. */
+    sheet?: string;
+  } & Record<string, JsonValue>;
+  /** Recalculate spreadsheet formulas. Return a temporary workbook to copy to its destination with the shell. */
+  office_recalculate: {
+    /** Path to an xls, xlsx, or ods workbook; not modified. */
+    input: string;
+    /** Output workbook format. */
+    format: "xlsx" | "ods";
+  } & Record<string, JsonValue>;
+  /** Render document pages, slides, or worksheet areas as images you can view. */
+  office_render: {
+    /** Path to doc, docx, odt, xls, xlsx, ods, ppt, pptx, odp, or pdf; not modified. */
+    input: string;
+    /** Distinct one-based pages or slides; omit for all. Spreadsheets use sheet and range instead. */
+    pages?: number[];
+    /** Exact worksheet name; omit to render every visible sheet. */
+    sheet?: string;
+    /** A1 range, such as A1:H40; requires sheet. Omit for the used area. */
+    range?: string;
+    /** Resolution from 24 to 600; default 144. */
+    dpi?: number;
   } & Record<string, JsonValue>;
   /** Declare existing files as final deliverables for the user. Hosts may show presented files only after your turn ends, so call it once the files are final. If the user needs to review files earlier, such as before a tool call that waits for their answer, link them in your message instead. Use it when the user needs a separate file, especially Office documents, spreadsheets, and slide decks; prefer your final response when that suffices. The user opens the current files; their contents are not copied. */
   present: {
@@ -257,27 +285,23 @@ interface ToolArgsMap {
     /** The exact skill name from the available skills list. */
     name: string;
   } & Record<string, JsonValue>;
-  /** Delegate a self-contained task to a subagent (a separate agent that works in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. This tool starts an independently managed subagent and immediately returns its name. If you are still online when it finishes, the runtime automatically delivers its completion notice. The notice includes the final answer unless the child sent you a message just before finishing. Use `send_message` to steer it while running or continue its conversation after it finishes. Omit `provider`, `model`, and `reasoning_effort` to use child defaults, falling back to compatible parent values. */
+  /** Delegate a self-contained task to a subagent (a separate agent that works in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. This tool starts an independently managed subagent and immediately returns its name. If you are still online when it finishes, the runtime automatically delivers its completion notice. The notice includes the final answer unless the child sent you a message just before finishing. Use `send_message` to steer it while running or continue its conversation after it finishes. */
   subagent: {
-    /** Initial child working directory. Relative paths use your current directory; omitted inherits it. Later directory changes in either agent are independent. */
-    cwd?: string;
     /** A short (3-5 word) description of the delegated task, for display. Use the language of the user's current request. */
     description: string;
     /** Optional short name for the subagent, unique among the subagents you create: lower-case letters, digits, and hyphens, starting with a letter, at most 32 characters; lead is reserved for the root agent. Omitted names default to agent-1, agent-2, and so on. */
     name?: string;
     /** The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs. */
     prompt: string;
-    /** Child LLM provider id; requires `model`. */
+    /** LLM provider id for the subagent; requires `model`. Set only when the task needs a different model; omit `provider`, `model`, and `reasoning_effort` to run the subagent on your current model and reasoning effort. Use a provider id listed by `list_subagent_models`. */
     provider?: string;
     /** Model id within that provider; requires `provider`. */
     model?: string;
-    /** Reasoning effort id; requires `provider` and `model`. Omit to use the selected model's default, even when it matches the parent or configured route. */
+    /** Reasoning effort id; requires `provider` and `model`. Omit to use that model's default effort. */
     reasoning_effort?: string;
   } & Record<string, JsonValue>;
   /** Delegate a task to a subagent that inherits this conversation: a child agent seeded with all completed turns so far (it does not see the current in-flight turn). Use this when the subtask builds on this conversation's context — a follow-up analysis, a review, a continuation — without consuming this conversation's context for the work itself. You receive its result, not its intermediate steps. This tool starts an independently managed subagent and immediately returns its name. If you are still online when it finishes, the runtime automatically delivers its completion notice. The notice includes the final answer unless the child sent you a message just before finishing. Use `send_message` to steer it while running or continue its conversation after it finishes. */
   subagent_fork: {
-    /** Initial child working directory. Relative paths use your current directory; omitted inherits it. Later directory changes in either agent are independent. */
-    cwd?: string;
     /** A short (3-5 word) description of the delegated task, for display. Use the language of the user's current request. */
     description: string;
     /** Optional short name for the subagent, unique among the subagents you create: lower-case letters, digits, and hyphens, starting with a letter, at most 32 characters; lead is reserved for the root agent. Omitted names default to agent-1, agent-2, and so on. */
@@ -375,11 +399,6 @@ interface ToolArgsMap {
     /** 1–10 search queries; their results are merged. */
     queries: string[];
   } & Record<string, JsonValue>;
-  /** Read the current working directory, or change it with cd. Relative paths use the current directory. Existing shells and running processes keep their own directories. */
-  working_directory: {
-    /** Existing directory to enter. Omit to read the current directory. */
-    cd?: string;
-  } & Record<string, JsonValue>;
   /** Create or fully replace a UTF-8 text file. */
   write: {
     /** Path to write, resolved by the filesystem backend. Provide `file_path` before `content` in the arguments. */
@@ -455,9 +474,6 @@ interface ToolOutputMap {
       line: string;
     }[];
   };
-  interrupt_agent: {
-    accepted: boolean;
-  };
   job_kill: {
     outcome: "cancellation-requested" | "already-finished";
     job: {
@@ -497,6 +513,53 @@ interface ToolOutputMap {
     description?: string;
   })[];
   list_subagent_models: string;
+  office_convert: {
+    operation: "convert";
+    /** Canonical absolute input path. */
+    path: string;
+    /** Absolute path of the temporary output file. */
+    file: string;
+    format: "pdf" | "docx" | "odt" | "txt" | "xlsx" | "ods" | "csv" | "pptx" | "odp";
+    bytes: number;
+    /** Page count the converter reports for the output. */
+    pageCount?: number;
+    missingFonts: string[];
+  };
+  office_recalculate: {
+    operation: "recalculate";
+    /** Canonical absolute input path. */
+    path: string;
+    /** Absolute path of the temporary output file. */
+    file: string;
+    format: "xlsx" | "ods";
+    bytes: number;
+    /** Page count the converter reports for the output. */
+    pageCount?: number;
+    missingFonts: string[];
+  };
+  office_render: {
+    operation: "render";
+    /** Canonical absolute input path. */
+    path: string;
+    /** Pages or slides of a document, or visible worksheets. */
+    pageCount: number;
+    dpi: number;
+    images: ({
+      page?: number;
+      sheet?: string;
+      range?: string;
+      attachmentId: string;
+      mediaType: "image/png" | "image/jpeg" | "image/webp";
+      bytes: number;
+      width: number;
+      height: number;
+      originalDimensions?: {
+        width: number;
+        height: number;
+      };
+    })[];
+    missingFonts: string[];
+  };
   present: {
     turn: number;
     files: {
@@ -550,22 +613,7 @@ interface ToolOutputMap {
     }[];
     totalLines: number;
   };
-  read_image: {
-    /** Canonical absolute path in the filesystem execution world. */
-    path: string;
-    image: {
-      attachmentId: string;
-      mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
-      bytes: number;
-      width: number;
-      height: number;
-      name?: string;
-      originalDimensions?: {
-        width: number;
-        height: number;
-      };
-    };
-  };
+  read_image: Image;
   schedule_create: {
     id: string;
     title: string;
@@ -1638,10 +1686,6 @@ interface ToolOutputMap {
       publishedAt?: string;
     }[];
     truncated: boolean;
-  };
-  working_directory: {
-    /** Current absolute working directory. */
-    cwd: string;
   };
   write: {
     /** Canonical absolute path in the filesystem execution world. */
