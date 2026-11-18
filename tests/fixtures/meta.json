@@ -1,7 +1,7 @@
 {
   "fixtureCwd": "/workspace/dsh-unrestricted",
-  "commit": "fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159",
-  "capturedAt": "2026-11-05T09:49:14.276Z",
+  "commit": "ca33fd6843b205e279c7ccb6cb73a472c78f5760",
+  "capturedAt": "2026-11-18T11:34:45.082Z",
   "dumps": {
     "standard": {
       "sections": [
@@ -30,18 +30,21 @@
       ],
       "tools": [
         "ask_user_question",
+        "cordis_inspect",
         "create_goal",
         "edit",
         "exit_plan_mode",
         "get_goal",
         "glob",
         "grep",
-        "interrupt_agent",
         "job_kill",
         "job_list",
         "job_output",
         "list_agents",
         "list_subagent_models",
+        "office_convert",
+        "office_recalculate",
+        "office_render",
         "plugin_manager",
         "present",
         "pwsh",
@@ -65,10 +68,9 @@
         "web_fetch",
         "web_search",
         "workflow",
-        "working_directory",
         "write"
       ],
-      "promptBytes": 5155
+      "promptBytes": 4998
     },
     "standard-plan": {
       "sections": [
@@ -97,18 +99,21 @@
       ],
       "tools": [
         "ask_user_question",
+        "cordis_inspect",
         "create_goal",
         "edit",
         "exit_plan_mode",
         "get_goal",
         "glob",
         "grep",
-        "interrupt_agent",
         "job_kill",
         "job_list",
         "job_output",
         "list_agents",
         "list_subagent_models",
+        "office_convert",
+        "office_recalculate",
+        "office_render",
         "plugin_manager",
         "present",
         "pwsh",
@@ -132,10 +137,9 @@
         "web_fetch",
         "web_search",
         "workflow",
-        "working_directory",
         "write"
       ],
-      "promptBytes": 7519
+      "promptBytes": 7362
     },
     "ptc": {
       "sections": [
@@ -166,7 +170,7 @@
       "tools": [
         "run_code"
       ],
-      "promptBytes": 59549
+      "promptBytes": 60561
     },
     "ptc-plan": {
       "sections": [
@@ -197,7 +201,7 @@
       "tools": [
         "run_code"
       ],
-      "promptBytes": 61913
+      "promptBytes": 62925
     },
     "cordis": {
       "sections": [
@@ -226,15 +230,13 @@
       ],
       "tools": [
         "ask_user_question",
-        "cordis_inspect_list",
-        "cordis_inspect_query",
+        "cordis_inspect",
         "create_goal",
         "edit",
         "exit_plan_mode",
         "get_goal",
         "glob",
         "grep",
-        "interrupt_agent",
         "job_kill",
         "job_list",
         "job_output",
@@ -263,10 +265,9 @@
         "web_fetch",
         "web_search",
         "workflow",
-        "working_directory",
         "write"
       ],
-      "promptBytes": 5155
+      "promptBytes": 5051
     },
     "cordis-plan": {
       "sections": [
@@ -295,15 +296,13 @@
       ],
       "tools": [
         "ask_user_question",
-        "cordis_inspect_list",
-        "cordis_inspect_query",
+        "cordis_inspect",
         "create_goal",
         "edit",
         "exit_plan_mode",
         "get_goal",
         "glob",
         "grep",
-        "interrupt_agent",
         "job_kill",
         "job_list",
         "job_output",
@@ -332,10 +331,9 @@
         "web_fetch",
         "web_search",
         "workflow",
-        "working_directory",
         "write"
       ],
-      "promptBytes": 7519
+      "promptBytes": 7415
     },
     "minimal": {
       "sections": [
@@ -347,8 +345,7 @@
         "team_task_create",
         "team_task_get",
         "team_task_list",
-        "team_task_update",
-        "working_directory"
+        "team_task_update"
       ],
       "promptBytes": 46
     },
@@ -379,18 +376,21 @@
       ],
       "tools": [
         "ask_user_question",
+        "cordis_inspect",
         "create_goal",
         "edit",
         "exit_plan_mode",
         "get_goal",
         "glob",
         "grep",
-        "interrupt_agent",
         "job_kill",
         "job_list",
         "job_output",
         "list_agents",
         "list_subagent_models",
+        "office_convert",
+        "office_recalculate",
+        "office_render",
         "plugin_manager",
         "present",
         "pwsh",
@@ -414,10 +414,9 @@
         "web_fetch",
         "web_search",
         "workflow",
-        "working_directory",
         "write"
       ],
-      "promptBytes": 5155
+      "promptBytes": 4998
     }
   }
 }
