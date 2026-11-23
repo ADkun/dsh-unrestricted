@@ -1,0 +1,25 @@
+# dk 排除声明（.gitignore 语法）。
+# 人在此写目录级排除，一次写清，例如：docs/theory/**
+# 工具会把「判定不值得建卡」的精确路径追加到下方的 dk:proposed 分节。
+
+# 生成物与第三方：只由工具产出，不值得建卡。
+lib/**
+tests/fixtures/**
+pnpm-lock.yaml
+LICENSE
+THIRD_PARTY_NOTICES.md
+.gitattributes
+.gitignore
+
+# dk:proposed
+README.md
+README.en.md
+README.ja.md
+tsconfig.json
+locale/en.json
+locale/zh.json
+docs/prompt-fusion.en.md
+docs/prompt-fusion.ja.md
+docs/prompt-refactor-v0.1.7.en.md
+docs/prompt-refactor-v0.1.7.ja.md
+docs-work/**
