@@ -48,11 +48,19 @@ last_reviewed: 2026-10-18
 | TC-C03 | PresetModeState | 配置事件与手动刷新重叠时保留新状态，所有请求结束后才解除忙碌 | I3（忙碌态） | 机检 |
 | TC-C04 | PresetModeState | 开关提交立即使旧预览失效；配置刷新不能提前结束未完成的写入 | I8、I3 | 机检 |
 | TC-M01 | 浏览器依赖 | `package.json` 声明当前 master 所需的 renderer/settings 客户端依赖 | 对外接口 | 机检 |
+| TC-T01 | TemplateEntry | 首个 `# 标题` 作显示名并从正文剥离；BOM 与 CRLF 归一 | I10 | 机检 |
+| TC-T02 | TemplateEntry | 非 `.md` 忽略、`original.md` 保留拒绝、空正文与超长文件只进 `problems` | I10 | 机检 |
+| TC-T03 | TemplateEntry | 模板目录缺失降级为一条 problem，不抛错 | I10 | 机检 |
+| TC-T04 | TemplateEntry | 可选列表第 0 项恒为内置块，随包 `armor-en.md` 被读到 | I10 | 机检 |
+| TC-T05 | FusionResult | `block` 参数替换规则段正文，缺省仍是内置块 | I7、I11 | 机检 |
+| TC-T06 | 配置读取 | `readTemplate` 接受 config 句柄与纯对象，空串/非字符串视为未配置 | 对外接口 | 机检 |
+| TC-T07 | FusionResult | 规则段与 Minimal 影子恒带 `interpolate: false`：模板里的 `{{...}}` 不参与插值，也不致装配抛错 | I12 | 机检 |
+| TC-T08 | `scanTemplates` | 空 id（文件名 `.md`）与重名 id 进 `problems`，不生成第二个同 id 选项 | I10 | 机检 |
 | TC-L01 | 装配降级 | 瀑布内任何异常都不穿透，返回原始装配 | 非功能红线 1 | 评 |
 | TC-L02 | 开关关闭 | 关闭后不读不写提示词，界面回到未安装态 | I1 | 人 |
 
-用例总数以 `pnpm test` 的输出为准（当前 `pass 37` 含子断言）；新增用例必须同时在
-本表登记，ID 与不变量编号互指。
+用例总数以 `pnpm test` 的输出为准（当前 `pass 57` 含子断言；模板相关 14 条在
+`tests/templates.spec.mjs`）；新增用例必须同时在本表登记，ID 与不变量编号互指。
 
 ## 迁移矩阵
 
@@ -93,3 +101,4 @@ last_reviewed: 2026-10-18
 | HR-03 | 装配期惰性 | 只打开一个非 minimal 预设时，`status` 不应阻塞在该预设以外的校验上（观察设置页首次打开耗时） |
 | HR-04 | 界面文案归属 | 设置页一节与输入框开关同源：任一处切换后另一处无需刷新即一致 |
 | HR-05 | 真机验收 | `node tools/verify-live.mjs --repo <DSH 源码树>` 全绿；无源码树时该项在 `docs-work/pending.md` 保持未销账 |
+| HR-06 | 模板选择生效 | 设置页选 `armor-en` 后，任一预设的预览正文等于 `prompts/armor-en.md` 正文（不含标题行），重启后仍保持所选模板 |

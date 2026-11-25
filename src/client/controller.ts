@@ -12,9 +12,11 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: the ctx.configForms Context merge.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 
-/** The toggle section stored in the `unrestricted` settings namespace. */
+/** The section stored in the `unrestricted` settings namespace. */
 export interface UnrestrictedSettings {
   enabled?: boolean
+  /** Selected prompt-template id; `original` is the built-in block. */
+  template?: string
 }
 
 /** Per-preset fusion state reported by the host half. */
@@ -29,18 +31,36 @@ export interface UnrestrictedModeState {
   broken?: string
 }
 
+/** One selectable execution-mode template offered by the host half. */
+export interface UnrestrictedTemplate {
+  id: string
+  /** True for the built-in block, which has no file behind it. */
+  builtin: boolean
+  /** Display name: the file's `# Heading`, else its id. */
+  title?: string
+  bytes?: number
+  lines?: number
+}
+
 /** Host status endpoint payload. */
 export interface UnrestrictedStatus {
   enabled: boolean
-  /** Fingerprint of the contract bytes the host half deploys. */
-  contract: string
+  /** Selected template id as the host resolved it. */
+  template: string
+  /** Directory `*.md` templates are read from. */
+  templateDir?: string
+  /** True when the selected id has no file: the built-in block is in use. */
+  templateMissing?: boolean
+  /** Selectable templates; the built-in block comes first. */
+  templates: UnrestrictedTemplate[]
+  /** Template files that could not be used. */
+  templateProblems?: { file: string; message: string }[]
   modes: Record<string, UnrestrictedModeState>
 }
 
 /** Deploy preview for one preset: what switching on would actually assemble. */
 export interface UnrestrictedPreview {
   presetId: string
-  contract: string
   available: boolean
   /** `live` = bytes a live agent received; `standing` = preset scope, no agent bound. */
   source?: 'live' | 'standing'
@@ -63,6 +83,8 @@ export interface UnrestrictedPreviewEntry {
 export interface UnrestrictedViewSnapshot {
   /** Persisted toggle; undefined until the settings scope first syncs. */
   enabled: boolean
+  /** Selected template id from the settings document (immediate, not host-resolved). */
+  template: string
   /** Whether the Host document accepts writes. */
   writable: boolean
   /** Settings scope sync state. */
@@ -94,6 +116,8 @@ export interface UnrestrictedCardInjected {
   }
   /** Persist the toggle. */
   setEnabled: (enabled: boolean) => Promise<void>
+  /** Persist the selected prompt template. */
+  setTemplate: (template: string) => Promise<void>
   /** Flip the persisted toggle (the composer dock button). */
   toggle: () => Promise<void>
   /** Re-run the host-side anchor checks and refresh. */
@@ -107,6 +131,8 @@ export interface UnrestrictedCardInjected {
 const RPC_CHANNEL = '/api'
 const RPC_NAMESPACE = 'dsh-unrestricted'
 const SETTINGS_NS = 'unrestricted'
+/** Id of the built-in block, which has no file behind it. */
+const ORIGINAL_TEMPLATE = 'original'
 
 /** Human-readable error text for the banner. */
 function messageOf(error: unknown): string {
@@ -124,6 +150,7 @@ export function createUnrestrictedController(ctx: Context) {
 
   let snapshot: UnrestrictedViewSnapshot = {
     enabled: false,
+    template: ORIGINAL_TEMPLATE,
     writable: false,
     settingsStatus: 'loading',
     status: null,
@@ -147,9 +174,12 @@ export function createUnrestrictedController(ctx: Context) {
   function publish(): void {
     const settingsSnapshot = settings.getSnapshot()
     const enabled = settingsSnapshot.value?.enabled === true
-    if (enabled !== snapshot.enabled) invalidatePreviews()
+    const template = settingsSnapshot.value?.template ?? ORIGINAL_TEMPLATE
+    // Both keys change the deployed text, so both void the fetched previews.
+    if (enabled !== snapshot.enabled || template !== snapshot.template) invalidatePreviews()
     snapshot = {
       enabled,
+      template,
       writable: settingsSnapshot.writable,
       settingsStatus: settingsSnapshot.status,
       status: snapshot.status,
@@ -201,15 +231,31 @@ export function createUnrestrictedController(ctx: Context) {
     return readStatus('status', clearPreviews)
   }
 
-  function setEnabled(enabled: boolean): Promise<void> {
+  /**
+   * Write one settings key, then re-read the host status.
+   * @param key - settings key to persist.
+   * @param value - new value for that key.
+   */
+  function writeSetting<K extends keyof UnrestrictedSettings>(
+    key: K,
+    value: UnrestrictedSettings[K],
+  ): Promise<void> {
     return whileBusy(async () => {
       try {
-        await settings.set('enabled', enabled)
+        await settings.set(key, value)
         await refresh(true)
       } catch (error) {
         snapshot = { ...snapshot, message: messageOf(error) }
       }
     })
+  }
+
+  function setEnabled(enabled: boolean): Promise<void> {
+    return writeSetting('enabled', enabled)
+  }
+
+  function setTemplate(template: string): Promise<void> {
+    return writeSetting('template', template)
   }
 
   function recheck(): Promise<void> {
@@ -265,6 +311,7 @@ export function createUnrestrictedController(ctx: Context) {
     face: (): UnrestrictedCardInjected => ({
       hooks: { view },
       setEnabled,
+      setTemplate,
       toggle: () => setEnabled(!snapshot.enabled),
       recheck,
       refresh: () => refresh(true),

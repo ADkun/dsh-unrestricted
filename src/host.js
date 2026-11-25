@@ -86,3 +86,20 @@ export function readEnabled(config) {
     return false
   }
 }
+
+/**
+ * Read the selected prompt-template id from a live config handle (same two
+ * shapes {@link readEnabled} accepts). An absent or malformed id is reported as
+ * `undefined` so the caller applies the built-in default.
+ * @param config - the plugin config handle or plain config object.
+ * @returns the configured template id, or `undefined`.
+ */
+export function readTemplate(config) {
+  try {
+    const value = typeof config?.get === 'function' ? config.get() : config
+    const id = value?.template
+    return typeof id === 'string' && id.trim() !== '' ? id.trim() : undefined
+  } catch {
+    return undefined
+  }
+}

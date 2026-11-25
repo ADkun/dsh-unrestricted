@@ -132,21 +132,26 @@ function appendOnce(text, suffix) {
  * section, and optional structured-output guidance when a structured subagent
  * runs under minimal.
  * @param {string} [structuredText] - optional original `tool:structured_output` section text.
+ * @param {string} [block] - execution-mode section text: a template, or the built-in block.
  */
-export function fusedMinimalPrompt(structuredText = '') {
-  const base = ANCHORS.personaMinimal + PERSONA_POINTER + '\n\n' + EXECUTION_MODE_BLOCK
+export function fusedMinimalPrompt(structuredText = '', block = EXECUTION_MODE_BLOCK) {
+  const base = ANCHORS.personaMinimal + PERSONA_POINTER + '\n\n' + block
   const trimmed = structuredText.trim()
   if (trimmed === '') return base
   return base + '\n\n' + appendOnce(trimmed, STRUCTURED_OUTPUT_NOTE)
 }
 
-/** The exact bytes this plugin appends for one preset (used by preview and tests). */
-export function contractAdditions(presetId) {
+/**
+ * The exact bytes this plugin appends for one preset (used by preview and tests).
+ * @param {string} presetId - the composed preset id.
+ * @param {string} [block] - execution-mode section text: a template, or the built-in block.
+ */
+export function contractAdditions(presetId, block = EXECUTION_MODE_BLOCK) {
   const rules = rulesFor(presetId)
   if (rules === undefined) return undefined
   return {
     pointer: PERSONA_POINTER,
-    block: EXECUTION_MODE_BLOCK,
+    block,
     planNote: rules.plan === true || rules.plan === 'auto' ? PLAN_NOTE : '',
     ptcNote: rules.ptcOnly === true || rules.ptcOnly === 'auto' ? PTC_ONLY_NOTE : '',
     structuredNote: STRUCTURED_OUTPUT_NOTE,
@@ -182,11 +187,12 @@ export function renderPreview(assembly, render) {
  * @param sections - AssembledSection-shaped rows ({ name, text }) from the waterfall.
  * @param presetId - the composed preset id (known or generic).
  * @param options.isSubagent - tolerate a non-anchor persona (delegated personas shadow it).
+ * @param options.block - execution-mode section text: a template, or the built-in block.
  * @returns `{ sections }` with the fusion applied, or `{ issues }` with
  *   structured issue codes when an anchor fails — callers must then deliver
  *   the original assembly unchanged.
  */
-export function fuseSections(sections, presetId, { isSubagent = false } = {}) {
+export function fuseSections(sections, presetId, { isSubagent = false, block = EXECUTION_MODE_BLOCK } = {}) {
   const rules = rulesFor(presetId)
   const generic = rules === GENERIC_RULE
   if (sections.some(section => section.name === BLOCK_SECTION)) {
@@ -261,6 +267,9 @@ export function fuseSections(sections, presetId, { isSubagent = false } = {}) {
   const personaIndex = fused.findIndex(section => section.name === 'deployment:persona-prefix')
   const identityIndex = fused.findIndex(section => section.name === 'harness:identity')
   const insertAt = personaIndex >= 0 ? personaIndex + 1 : (identityIndex >= 0 ? identityIndex + 1 : 0)
-  fused.splice(insertAt, 0, { name: BLOCK_SECTION, text: EXECUTION_MODE_BLOCK })
+  // `interpolate: false` keeps the rule text literal: a template is user prose,
+  // not a prompt template with variables, and the host renderer throws on an
+  // unknown or malformed `{{...}}` reference (which would break every request).
+  fused.splice(insertAt, 0, { name: BLOCK_SECTION, text: block, interpolate: false })
   return { sections: fused }
 }

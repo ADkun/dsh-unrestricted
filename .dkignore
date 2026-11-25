@@ -23,3 +23,5 @@ docs/prompt-fusion.ja.md
 docs/prompt-refactor-v0.1.7.en.md
 docs/prompt-refactor-v0.1.7.ja.md
 docs-work/**
+_tmp/**
+_tmp_*.log

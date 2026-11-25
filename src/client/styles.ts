@@ -108,6 +108,26 @@ const CSS = `
   accent-color: var(--dsw-alias-state-business-primary);
 }
 
+.dsh-unrestricted-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+}
+
+.dsh-unrestricted-select {
+  min-width: 200px;
+  max-width: 320px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  padding: 3px 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
 .dsh-unrestricted-modes {
   display: flex;
   flex-direction: column;

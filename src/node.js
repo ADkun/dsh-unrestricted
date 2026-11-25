@@ -13,6 +13,10 @@
  *   added after this build) fuses generically. Tools, contexts, and variables
  *   pass through untouched; when disabled the listener returns `next()`
  *   verbatim, so the prompt is byte-identical to the unmodified harness.
+ * - The inserted section's text comes from the selected prompt template: the
+ *   built-in block, or one `prompts/*.md` file read before the assembly. The
+ *   directory is scanned on status / recheck / config change, never in the
+ *   waterfall; tools, plans, and the rest of the prompt stay untouched.
  * - `minimal` registers its persona with `complete: true`, which the registry
  *   restores AFTER the waterfall, so waterfall edits cannot reach it. For
  *   minimal agents (joined, switched via `agent-preset/selected`, or later
@@ -26,15 +30,17 @@
  * - Anchor failures (startup standing-scope check or any live assembly) leave
  *   that prompt unchanged and surface the issue codes in the settings card.
  *
- * The toggle lives in the `unrestricted` settings namespace (persisted to
- * $DSH_HOME/profiles/web/cordis.patch.yml). Switching affects the NEXT assembly of any live
- * or future agent — never an in-flight request or a logged session event.
+ * The toggle and the selected template id live in the `unrestricted` settings
+ * namespace (persisted to $DSH_HOME/profiles/web/cordis.patch.yml). Both affect
+ * the NEXT assembly of any live or future agent — never an in-flight request
+ * or a logged session event.
  */
-import { loadHost, readEnabled } from './host.js'
+import { loadHost, readEnabled, readTemplate } from './host.js'
 import {
   ANCHORS, PRESETS, fuseSections, fusedMinimalPrompt, isKnownPreset, renderPreview,
 } from './rules.js'
 import { registerRpcRoutes } from './rpc.js'
+import { builtinTemplate, DEFAULT_TEMPLATE_ID, defaultTemplateDir, loadTemplates } from './templates.js'
 
 // Host packages are resolved through the running DSH entry, never through this
 // bundle's own `node_modules` (a `link:` install has none). See ./host.js.
@@ -66,17 +72,21 @@ const renderPrompt = systemPromptModule?.renderPrompt ?? fallbackRender
 export const name = 'dsh-unrestricted'
 
 /** Current plugin package version. */
-export const PLUGIN_VERSION = '0.3.3'
+export const PLUGIN_VERSION = '0.4.0'
 
 /** Services required by this plugin (all base-backed profiles provide these). */
 export const inject = ['settings', 'systemPrompt', 'loader']
 
 /**
- * The volatile `enabled` flag. Built only when schemastery resolves: without it
- * the plugin still runs, but the Settings form and live toggling are absent.
+ * The volatile settings: the `enabled` flag and the selected prompt-template
+ * id. Built only when schemastery resolves: without it the plugin still runs,
+ * but the Settings form and live changes are absent.
  */
 export const Config = typeof z?.object === 'function'
-  ? z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }).volatile()
+  ? z.object({
+    enabled: z.boolean().default(false),
+    template: z.string().default(DEFAULT_TEMPLATE_ID),
+  }).default({ enabled: false, template: DEFAULT_TEMPLATE_ID }).volatile()
   : undefined
 
 /** Human-readable error text for status and RPC error branches. */
@@ -98,6 +108,14 @@ export function apply(ctx, config) {
 
   const state = {
     enabled: readEnabled(config),
+    /** Selected prompt-template id; unknown ids fall back to the built-in block. */
+    templateId: readTemplate(config) ?? DEFAULT_TEMPLATE_ID,
+    /** Selectable templates: index 0 is always the built-in block. */
+    templates: [builtinTemplate()],
+    /** Directory scanned for `*.md` template files. */
+    templateDir: defaultTemplateDir(),
+    /** `{ file, message }` rows for template files that could not be used. */
+    templateProblems: [],
     /** presetId -> issue codes; a preset with an empty list is verified. */
     startup: new Map(),
     /** presetId -> in-flight startup check. */
@@ -118,6 +136,60 @@ export function apply(ctx, config) {
   function modeIssues(presetId) {
     return [...state.startup.get(presetId) ?? [], ...state.runtime.get(presetId) ?? []]
   }
+
+  /** The selected template entry; index 0 (the built-in block) is the fallback. */
+  function activeTemplate() {
+    return state.templates.find(entry => entry.id === state.templateId) ?? state.templates[0]
+  }
+
+  /** Execution-mode section text to fuse into the next assembly. */
+  function activeBlock() {
+    return activeTemplate().text
+  }
+
+  /** Whether the configured template id has no file behind it. */
+  function templateMissing() {
+    return state.templateId !== DEFAULT_TEMPLATE_ID
+      && !state.templates.some(entry => entry.id === state.templateId)
+  }
+
+  let templateLoad
+
+  /**
+   * Read the template directory on the host half only — started once at apply,
+   * then status, preview, recheck. The assembly waterfall never begins a scan;
+   * it only awaits one already in flight and receives `activeBlock()` text.
+   * @param {boolean} [force] - rescan even when a scan already ran.
+   */
+  function ensureTemplates(force = false) {
+    if (!force && templateLoad !== undefined) return templateLoad
+    templateLoad = loadTemplates(defaultTemplateDir()).then((loaded) => {
+      state.templateDir = loaded.dir
+      state.templates = loaded.templates
+      state.templateProblems = loaded.problems
+      refreshFusion()
+    }).catch((error) => {
+      state.templateProblems = [{ file: state.templateDir, message: messageOf(error) }]
+    })
+    return templateLoad
+  }
+
+  /**
+   * Drop cached previews and — once minimal has been verified — rebuild its
+   * complete persona shadow with the current block text.
+   */
+  function refreshFusion() {
+    if (state.startup.has('minimal')) {
+      state.fusedMinimal = modeIssues('minimal').length === 0
+        ? fusedMinimalPrompt('', activeBlock())
+        : null
+    }
+    state.fusedText.clear()
+  }
+
+  // Start the scan here, before any listener exists: the assembly waterfall may
+  // await a scan that is already running, but never begins one itself.
+  void ensureTemplates()
 
   /**
    * Read the standing assembly of a preset using the registry's scope lease
@@ -198,6 +270,7 @@ export function apply(ctx, config) {
     pending = (async () => {
       const issues = []
       try {
+        await ensureTemplates()
         await ctx.loader.await()
         const presets = ctx.get('agentPresets')
         if (presets === undefined) {
@@ -207,14 +280,14 @@ export function apply(ctx, config) {
           return
         }
         const assembly = await presetAssembly(presetId)
-        const fused = fuseSections(assembly.sections, presetId)
+        const fused = fuseSections(assembly.sections, presetId, { block: activeBlock() })
         if (fused.issues !== undefined) issues.push(...fused.issues)
       } catch (error) {
         issues.push(`preset probe failed: ${messageOf(error)}`)
       }
       state.startup.set(presetId, issues)
       if (presetId === 'minimal') {
-        state.fusedMinimal = issues.length === 0 ? fusedMinimalPrompt() : null
+        state.fusedMinimal = issues.length === 0 ? fusedMinimalPrompt('', activeBlock()) : null
       }
     })().catch((error) => {
       state.startup.set(presetId, [`preset probe failed: ${messageOf(error)}`])
@@ -292,14 +365,17 @@ export function apply(ctx, config) {
         name: 'deployment:persona-prefix',
         order: 0,
         complete: true,
+        // The fused persona carries no variables: render it literally so a
+        // template's `{{...}}` prose cannot trip the host interpolator.
+        interpolate: false,
         text: (context) => {
           // 结构化工具注册在子代理 scope，不能只查询全局工具目录。
           const hasStructured = context?.agent?.ctx?.tools
             ?.schemas?.(context.agent)
             ?.some(tool => tool.name === 'structured_output') === true
           return hasStructured
-            ? fusedMinimalPrompt(ANCHORS.structuredOutputFull)
-            : (state.fusedMinimal ?? fusedMinimalPrompt())
+            ? fusedMinimalPrompt(ANCHORS.structuredOutputFull, activeBlock())
+            : (state.fusedMinimal ?? fusedMinimalPrompt('', activeBlock()))
         },
       })
     } catch (error) {
@@ -357,6 +433,18 @@ export function apply(ctx, config) {
     return {
       enabled: state.enabled,
       version: PLUGIN_VERSION,
+      /** Selected template id and the directory files are read from. */
+      template: state.templateId,
+      templateDir: state.templateDir,
+      templateMissing: templateMissing(),
+      templates: state.templates.map(entry => ({
+        id: entry.id,
+        builtin: entry.builtin,
+        title: entry.title,
+        bytes: entry.bytes,
+        lines: entry.lines,
+      })),
+      templateProblems: state.templateProblems,
       modes,
     }
   }
@@ -404,10 +492,11 @@ export function apply(ctx, config) {
       return { presetId, available: true, source: 'live', ...summarize(cached) }
     }
     try {
+      await ensureTemplates()
       const assembly = await presetAssembly(presetId)
       const fused = presetId === 'minimal'
-        ? { sections: [{ name: 'deployment:persona-prefix', text: fusedMinimalPrompt() }] }
-        : fuseSections(assembly.sections, presetId)
+        ? { sections: [{ name: 'deployment:persona-prefix', text: fusedMinimalPrompt('', activeBlock()), interpolate: false }] }
+        : fuseSections(assembly.sections, presetId, { block: activeBlock() })
       if (fused.issues !== undefined) {
         return {
           presetId,
@@ -433,6 +522,7 @@ export function apply(ctx, config) {
   async function handleRpc(endpoint, payload) {
     switch (endpoint) {
       case 'status': {
+        await ensureTemplates()
         if (state.enabled) await ensureChecks()
         return ok(await statusPayload())
       }
@@ -448,6 +538,7 @@ export function apply(ctx, config) {
         state.startup.clear()
         state.runtime.clear()
         state.fusedText.clear()
+        await ensureTemplates(true)
         await ensureChecks()
         if (state.enabled) sweepAgents()
         return ok(await statusPayload())
@@ -488,7 +579,7 @@ export function apply(ctx, config) {
       await ensureCheck('minimal')
       syncMinimalShadow(agent)
       if (state.customMinimal.has(agent) && usable('minimal')) {
-        const fused = fuseSections(original.sections, 'minimal', { isSubagent: true })
+        const fused = fuseSections(original.sections, 'minimal', { isSubagent: true, block: activeBlock() })
         if (fused.issues !== undefined) {
           state.runtime.set('minimal', fused.issues)
           return original
@@ -506,7 +597,7 @@ export function apply(ctx, config) {
     }
     if (!usable(presetId)) return original
     const isSubagent = original.contexts.some(entry => entry.name === 'subagent:delegation')
-    const fused = fuseSections(original.sections, presetId, { isSubagent })
+    const fused = fuseSections(original.sections, presetId, { isSubagent, block: activeBlock() })
     if (fused.issues !== undefined) {
       state.runtime.set(presetId, fused.issues)
       return original
@@ -550,10 +641,20 @@ export function apply(ctx, config) {
   ctx.effect(() => {
     const unwatch = ctx.on('loader/volatile-update', () => {
       const enabled = readEnabled(config)
-      if (enabled === state.enabled) return
+      const templateId = readTemplate(config) ?? DEFAULT_TEMPLATE_ID
+      const toggled = enabled !== state.enabled
+      const retemplated = templateId !== state.templateId
+      if (!toggled && !retemplated) return
       state.enabled = enabled
-      if (enabled) onEnable()
-      else onDisable()
+      state.templateId = templateId
+      if (toggled) {
+        if (enabled) onEnable()
+        else onDisable()
+        return
+      }
+      // Template-only change: the mode text moves, the anchor contract does not.
+      // Shadows read state.fusedMinimal on every assembly, so no re-sweep is due.
+      refreshFusion()
     })
     if (state.enabled) onEnable()
     return () => {

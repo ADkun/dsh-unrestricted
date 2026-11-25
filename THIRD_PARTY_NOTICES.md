@@ -64,3 +64,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+---
+
+## uncensored-armor（ARMOR_EN）
+
+`prompts/armor-en.md` 的规则正文来自本机 `D:\dsh\dshu-prompts\02-破甲提示词-en.md`，
+该文件标注其内容逐字等同于 `packages/context/uncensored-armor/src/armor.en.ts` 中导出的
+`ARMOR_EN` 常量。收入本仓库时仅做了两处与内容无关的处理：删除首行的来源注释与
+`<|im_start|>system:<project_instructions>` 的聊天模板包装行，并在首行加一个 `# ` 标题
+作为模板显示名（该行不参与注入）。
+
+源文件未标注许可证。此处仅作来源记录；如上游明确许可条款，以该条款为准。
+在本仓库中它只作为示例模板随包分发，删除 `prompts/armor-en.md` 不影响插件其余功能。

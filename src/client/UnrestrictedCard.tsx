@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: the settings section slot contract.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { UnrestrictedCardInjected, UnrestrictedModeState } from './controller.ts'
+import type { UnrestrictedCardInjected, UnrestrictedModeState, UnrestrictedStatus, UnrestrictedTemplate } from './controller.ts'
 import type { UnrestrictedLocaleKey } from './locales.ts'
 
 /** Full component props assembled by the Settings slot renderer. */
@@ -47,6 +47,14 @@ const ISSUE_LOCALE_KEYS: Readonly<Record<string, UnrestrictedLocaleKey>> = {
   'missing-structured-output': 'issueStructuredOutput',
 }
 
+/** One row of the host's unreadable-template report. */
+type TemplateProblem = NonNullable<UnrestrictedStatus['templateProblems']>[number]
+
+/** Human-readable summary of the template files the host could not use. */
+function formatTemplateProblems(problems: readonly TemplateProblem[]): string {
+  return problems.map((problem) => `${problem.file}: ${problem.message}`).join('; ')
+}
+
 /** Locale key for one mode state. */
 function stateKey(mode: UnrestrictedModeState | undefined): UnrestrictedLocaleKey {
   switch (mode?.state) {
@@ -66,6 +74,7 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
   const { t, loadPreview } = props
   const view = props.useView(snapshot => snapshot)
   const status = view.status
+  const templates = status?.templates ?? []
   const [openPreview, setOpenPreview] = useState<string | null>(null)
   const openEntry = openPreview === null ? undefined : view.previews[openPreview]
 
@@ -137,6 +146,42 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
           />
           <span>{t('toggle')}</span>
         </label>
+        {view.settingsStatus === 'ready' && templates.length > 0 && (
+          <div className="dsh-unrestricted-field">
+            <label className="dsh-unrestricted-fieldLabel" htmlFor="dsh-unrestricted-template">
+              {t('templateLabel')}
+            </label>
+            <select
+              id="dsh-unrestricted-template"
+              className="dsh-unrestricted-select"
+              value={view.template}
+              disabled={!view.writable || view.settingsStatus !== 'ready' || view.busy}
+              onChange={(event: { target: { value: string } }) => { void props.setTemplate(event.target.value) }}
+            >
+              {status?.templateMissing === true
+                && !templates.some((template: UnrestrictedTemplate) => template.id === view.template) && (
+                <option value={view.template}>{view.template} · {t('templateMissingTag')}</option>
+              )}
+              {templates.map((template: UnrestrictedTemplate) => (
+                <option key={template.id} value={template.id}>
+                  {template.builtin === true ? t('templateOriginal') : (template.title ?? template.id)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {status?.templateMissing === true && (
+          <p className="dsh-unrestricted-error">{t('templateMissing')}</p>
+        )}
+        {status?.templateDir !== undefined && (
+          <p className="dsh-unrestricted-note">{t('templateNote')}<code>{status.templateDir}</code></p>
+        )}
+        {(status?.templateProblems?.length ?? 0) > 0 && (
+          <p className="dsh-unrestricted-note">
+            {t('templateProblems')}
+            {formatTemplateProblems(status?.templateProblems ?? [])}
+          </p>
+        )}
         {view.settingsStatus === 'loading' && (
           <p className="dsh-unrestricted-note">{t('settingsLoading')}</p>
         )}

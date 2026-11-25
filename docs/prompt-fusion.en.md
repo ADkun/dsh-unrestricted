@@ -44,7 +44,20 @@ The rule block (`EXECUTION_MODE_BLOCK`) covers the following areas:
 
 ---
 
-## 3. Mode Adaptation
+## 3. Prompt Templates
+
+The text of the inserted `unrestricted:execution-mode` section is selectable. The default, **Original**, is the built-in block described above (`EXECUTION_MODE_BLOCK`).
+
+- **Directory**: the plugin's `prompts/` folder; each `.md` file is one template. A leading `# Title` line names it in Settings and is stripped from the body; the rest becomes the section text verbatim. Without a heading, the filename is used.
+- **Selection**: the Prompt template dropdown in Settings. Press Re-check after adding files to rescan; a change applies from the next request and new subagents.
+- **Original**: a synthesized id `original` with no file behind it; its body is the `src/rules.js` constant, never a second copy on disk. A file named `original.md` is reserved and rejected.
+- **Scope**: a template replaces only the rule section's body. Identity, persona, plan, PTC-only, structured-output sections and tool definitions stay untouched; the original anchor checks still gate fusion, and any failure delivers the unmodified prompt.
+- **Literal delivery**: the rule section always carries `interpolate: false` (the Minimal persona shadow too), so `{{...}}` in a template stays verbatim — it is neither substituted by the host interpolator nor able to throw on an unknown or malformed reference and break the request.
+- **Shipped**: `prompts/` is in package.json `files`. `armor-en.md` carries the English armor prompt (ARMOR_EN) from `D:\dsh\dshu-prompts\02-破甲提示词-en.md`; selecting it swaps the built-in rules for that English section.
+
+---
+
+## 4. Mode Adaptation
 
 Each DSH preset structures its prompt sections differently:
 
@@ -66,7 +79,7 @@ Each DSH preset structures its prompt sections differently:
 
 ---
 
-## 4. Structural Fusion & Prompt Preview
+## 5. Structural Fusion & Prompt Preview
 
 ### Structural Section Fusion
 During assembly, the plugin locates and fuses prompt sections by DSH's canonical section names (`deployment:persona-prefix`, `plan:policy`, `tools:ptc-only`, `tool:structured_output`) with idempotency guards, supporting both DSH Web and DSH Desktop without brittle exact-string or hash checks. If a custom preset omits the persona section, it safely falls back to the stock prompt.
@@ -76,7 +89,7 @@ The settings UI queries an RPC endpoint to preview the full assembled system pro
 
 ---
 
-## 5. Testing & Verification Scripts
+## 6. Testing & Verification Scripts
 
 ```sh
 # Run unit tests

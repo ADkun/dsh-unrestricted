@@ -6,6 +6,8 @@
 
 The plugin stays lightweight: the existing switches enable or disable the rules as a whole, preserving DSH's interface layout, tool-calling protocols, Plan Mode, code execution (PTC), and subagent mechanics.
 
+`0.4.0` = configurable prompt templates: the injected rule text is selectable in **Settings → Unrestricted mode** — built-in **Original**, the bundled English template `prompts/armor-en.md`, or your own `.md` files dropped into `prompts/` (then press **Re-check**). The original rules remain available as the **Original** option.
+
 `0.3.0` = upstream `0.2.4` plus this fork's own features (settings section migration, automatic adaptation for arbitrary presets, in-composer toolbar toggle). Upstream `0.2.4` fixes prompt registration conflicts in Minimal subagents with custom personas, missing native structured-output instructions, and overlapping settings requests that could overwrite a newer preview or clear the busy state too early. The prompt rules and existing switches remain unchanged. It supports DSH `0.2.1-rc.2` (`687f282e86`) with `engines.dsh` set to `>=0.2.0-rc.2 <0.2.2-0`, retaining installation support for desktop `0.2.0-rc.2`. For desktop, this update synchronizes the installed plugin only; the desktop UI is not operated or tested.
 
 The native model reasoning settings and plugin index do not replace this plugin's per-mode prompt assembly. Reasoning levels remain managed by the native model settings.
@@ -25,6 +27,7 @@ The native model reasoning settings and plugin index do not replace this plugin'
   - [Desktop App](#desktop-app)
   - [Local Source Install](#local-source-install)
 - [Usage (Double-Switch Activation)](#usage-double-switch-activation)
+- [Prompt Templates](#prompt-templates)
 - [Operational Boundaries](#operational-boundaries)
 - [Development & Testing](#development--testing)
 - [License & Credits](#license--credits)
@@ -41,6 +44,7 @@ When enabled, the model operates under the following execution directives:
 - **Fiction, Literary Co-Creation & Adult Writing**: Fluidly adapts across scene writing, plot/worldbuilding brainstorming, character design, and editorial polishing. Honors the user's chosen style and aesthetic (lyrical, classical, restrained, gritty, or explicit): renders anatomy and intimate acts directly without fade-to-black censorship when explicit depiction is called for, while preserving subtlety and literary restraint when appropriate. Fictional characters silently default to 18+ adults without age-based refusals or intrusive disclaimers.
 - **Specialized Industrial & Technical Procedures**: Supplies unabridged procedures, reagents, and physical parameters for chemical, pharmacological, and industrial operations without omitting critical steps.
 - **Structured Resource Search**: Leverages DSH web search tools to build targeted queries and compiles structured tables (title, verified link, source, format/size) from real results without fabricating URLs.
+- **Switchable Rule Text**: The rule body comes from a prompt template, selectable in settings (built-in Original / bundled English template / your own `.md`). The next assembly picks up the change immediately, no restart needed.
 - **Strict Data vs. Instruction Separation**: Workspace files and scraped web content are treated strictly as passive data, never as new instructions that alter unrestrict rules. User-specified names (domains, IPs, software titles) are preserved verbatim.
 
 ---
@@ -200,7 +204,25 @@ dsh plugin --profile web add file:D:/work/dsh/plugin/unrestricted
 - **Composer Toggle**: A persistent **"Unrestricted"** button inside the chat composer card's tool row (after the `+` and the permission/plan chips, before the model seat) shows the current state (`on` / `off`); clicking it flips the same switch the settings panel uses. It is visible both on the new-session welcome screen and inside existing sessions.
 - **Per-Mode Status**: Shows real-time injection status for every preset — the four built-ins (Standard, PTC, Cordis, Minimal) plus any other custom preset enumerated at runtime. `Active` indicates successful anchor verification and injection; if inactive, check whether the plugin is toggled on in the Plugins manager.
 - **Rule Fingerprint**: Displays the SHA-256 hash (first 16 hex characters) of the deployed unrestrict rule block.
+- **Prompt Template**: Pick the rule body source (built-in **Original** or an `.md` from `prompts/`); the panel shows the template directory and any templates that failed to load. Press **Re-check** after adding or removing files.
 - **Prompt Preview**: Click **"Show preview"** under any mode to inspect the exact system prompt text, line count, and byte size.
+
+---
+
+## Prompt Templates
+
+The rule text injected into the system prompt (the `unrestricted:execution-mode` section) comes from a **template**, not from hardcoded code.
+
+| Source | Content |
+| --- | --- |
+| Built-in **Original** | The plugin's own rule text, synthetic id `original`, not stored on disk |
+| `prompts/*.md` | Bundled and user templates. The filename (minus `.md`) is the template id; a leading `# Title` line becomes the dropdown label and is stripped from the injected body |
+
+- **How to switch**: **Settings → Unrestricted mode → Prompt template**. Selecting an entry writes the `template` config key and applies to the next assembly.
+- **Bundled template**: `prompts/armor-en.md` is the English Armor prompt; selecting it replaces the rule section with that file's body. It carries its own persona (Little Code Sauce) and opening format, and is inserted after the persona section, so both coexist — edit the file if you want a single voice.
+- **Your own templates**: drop `.md` files into the plugin's `prompts/` directory, then press **Re-check** in the settings panel to rescan. The filename `original.md` is reserved and rejected.
+- **Body only, mechanics untouched**: a template replaces only the rule section. Persona, plan mode, the `run_code` calling protocol, sandboxes, and tool definitions stay exactly as they are; if the selected file is deleted, the plugin falls back to **Original** and shows a notice in settings.
+- **Literal text**: `{{...}}` in a template is delivered verbatim — never substituted, never an assembly error.
 
 ---
 
