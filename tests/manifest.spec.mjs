@@ -16,5 +16,5 @@ test('declares the current client renderer, settings dependencies, and engine ra
   ])
   assert.equal(manifest.dsh.client.platform, 'web')
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
-  assert.equal(manifest.engines.dsh, '>=0.2.0-rc.2 <0.2.3-0')
+  assert.equal(manifest.engines.dsh, '>=0.2.0-rc.2 <0.2.4-0')
 })

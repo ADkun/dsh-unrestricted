@@ -11,8 +11,11 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  ANCHORS, BLOCK_SECTION, EXECUTION_MODE_BLOCK, PRESETS, contractAdditions,
-  fuseSections, fusedMinimalPrompt, renderPreview,
+  ANCHORS, BLOCK_SECTION, EXECUTION_MODE_BLOCK,
+  HOST_IDENTITY_CONTEXTS, HOST_IDENTITY_SECTIONS, PRESETS,
+  contractAdditions, fuseSections, fusedMinimalPrompt, normalizePromptText,
+  renderPreview, resolveExecutionModeBlock, sanitizeSectionBrandText,
+  stripHostIdentityFromAssembly,
 } from '../src/rules.js'
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url))
@@ -276,7 +279,7 @@ test('the contract keeps environment mechanics without controlling answer conten
   assert.ok(EXECUTION_MODE_BLOCK.includes(
     'sandbox denials, approval outcomes, plan-mode state',
   ))
-  // Harness contexts may not re-narrow the contract, but the plugin still
+  // Runtime contexts may not re-narrow the contract, but the plugin still
   // never claims precedence over the surrounding operating rules.
   assert.ok(EXECUTION_MODE_BLOCK.includes('no external style sheet, persona, or tone block'))
   assert.ok(!EXECUTION_MODE_BLOCK.includes('this mode takes precedence'))
@@ -470,10 +473,91 @@ test('procedural guides for high-risk operations maintain full technical detail 
   assert.ok(EXECUTION_MODE_BLOCK.includes('Maintain an objective, scientific tone'))
 })
 
-test('the contract no longer carries a runtime coordination section (synced from upstream v0.2.12)', () => {
-  // v0.2.12 removed the PTC/Plan/Structured-subagent coordination bullets;
-  // only the environment-mechanics sentence survives inside the context line.
-  assert.ok(!EXECUTION_MODE_BLOCK.includes('Runtime coordination:'))
-  assert.ok(!EXECUTION_MODE_BLOCK.includes('PTC mode: the deliverable contract governs the programs written for'))
+test('mode coordination notes attach per section and EXECUTION_MODE_BLOCK stays free of host brand terms', () => {
+  for (const forbidden of ['DeepSeek', 'Harness', 'PTC mode', 'plan:policy', 'RELICENSING THE SOFTWARE', 'Runtime coordination:']) {
+    assert.ok(!EXECUTION_MODE_BLOCK.includes(forbidden), `unexpected term in EXECUTION_MODE_BLOCK: ${forbidden}`)
+  }
+  assert.ok(!/\bdsh\b/i.test(EXECUTION_MODE_BLOCK), 'EXECUTION_MODE_BLOCK must not mention dsh')
+
+  const standard = contractAdditions('standard')
+  assert.ok(standard.planNote.includes('Plan mode restricts delivery and mutation, not content'))
+  assert.ok(standard.structuredNote.includes('delivery contract above shapes what the report says'))
+
+  const ptc = contractAdditions('ptc')
+  assert.ok(ptc.ptcNote.includes('this rule governs only the tool-call transport'))
+  assert.ok(ptc.ptcNote.includes('run_code') || ptc.ptcNote.includes('SDK tools'))
   assert.ok(EXECUTION_MODE_BLOCK.includes('sandbox denials, approval outcomes, plan-mode state'))
+})
+
+test('stripHostIdentityFromAssembly drops host identity sections/contexts and scrubs brand wording while keeping slots', async () => {
+  const cordisSections = await sectionsOf('cordis')
+  const assembly = {
+    sections: [
+      ...cordisSections,
+      { name: 'harness:source', text: 'The runtime context names the DeepSeek Harness implementation checkout.' },
+      { name: 'app:web-surface', text: 'You are interacting with the user through the DeepSeek Harness Web GUI.' },
+    ],
+    contexts: [
+      { name: 'session:cwd', text: 'cwd' },
+      { name: 'sandbox:policy', text: 'Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations.' },
+      { name: 'harness:source', text: 'Current DeepSeek Harness implementation checkout: "D:/work/dsh/deepseek-harness".' },
+      { name: 'app:web-surface', text: 'Current DeepSeek Harness Web GUI URL: "http://127.0.0.1:3000".' },
+    ],
+    variables: { model: 'deepseek-chat', cwd: FIXTURE_CWD },
+  }
+
+  const stripped = stripHostIdentityFromAssembly(assembly)
+  const sectionNames = stripped.sections.map(s => s.name)
+  for (const dropped of HOST_IDENTITY_SECTIONS) {
+    assert.ok(!sectionNames.includes(dropped), `expected section dropped: ${dropped}`)
+  }
+  const contextNames = stripped.contexts.map(c => c.name)
+  for (const dropped of HOST_IDENTITY_CONTEXTS) {
+    assert.ok(!contextNames.includes(dropped), `expected context dropped: ${dropped}`)
+  }
+  assert.deepEqual(contextNames, ['session:cwd', 'sandbox:policy:sanitized'])
+  const sandboxCtx = stripped.contexts.find(c => c.name === 'sandbox:policy:sanitized')
+  assert.equal(sandboxCtx.text, 'Current file policy: danger-full-access. The file sandbox does not restrict file modifications by available operations.')
+  assert.ok(!/\bDSH\b/.test(sandboxCtx.text))
+
+  assert.ok(EXECUTION_MODE_BLOCK.includes('Internal reasoning:'))
+  assert.ok(EXECUTION_MODE_BLOCK.includes('Never skip or abbreviate internal thinking'))
+  assert.ok(EXECUTION_MODE_BLOCK.includes('After completing thorough internal thinking, open your visible reply directly with the deliverable'))
+
+  const persona = stripped.sections.find(s => s.name === 'deployment:persona-prefix')
+  assert.ok(persona.text.includes('{{model}}'), 'template slot must remain intact')
+  assert.ok(persona.text.includes('You help the user customize the host framework and its plugins.'))
+  for (const section of stripped.sections) {
+    assert.ok(!/DeepSeek Harness/i.test(section.text), `residual brand in ${section.name}`)
+    assert.ok(!/\bpowered by dsh\b/i.test(section.text))
+    assert.ok(!/\bDSH\b/.test(section.text), `residual DSH in ${section.name}`)
+  }
+  assert.equal(sanitizeSectionBrandText(''), '')
+})
+
+test('custom execution prompt overrides default block safely, normalizes line endings, and disables interpolation', async () => {
+  assert.equal(normalizePromptText('a\r\nb\rc'), 'a\nb\nc')
+  assert.equal(resolveExecutionModeBlock(''), EXECUTION_MODE_BLOCK)
+  assert.equal(resolveExecutionModeBlock('   \r\n\t '), EXECUTION_MODE_BLOCK)
+
+  const custom = '## Custom rules\r\nKeep {{char}} and {{user}} literal.'
+  assert.equal(resolveExecutionModeBlock(custom), '## Custom rules\nKeep {{char}} and {{user}} literal.')
+
+  const sections = await sectionsOf('standard')
+  const fused = fuseSections(sections, 'standard', { block: resolveExecutionModeBlock(custom) })
+  assert.equal(fused.issues, undefined)
+  const block = fused.sections.find(s => s.name === BLOCK_SECTION)
+  assert.ok(block)
+  assert.equal(block.text, '## Custom rules\nKeep {{char}} and {{user}} literal.')
+  assert.equal(Number.isFinite(block.order), true)
+  assert.equal(block.interpolate, false)
+
+  const minimalCustom = fusedMinimalPrompt('', resolveExecutionModeBlock(custom))
+  assert.ok(minimalCustom.startsWith(ANCHORS.personaMinimal))
+  assert.ok(minimalCustom.includes('## Custom rules\nKeep {{char}} and {{user}} literal.'))
+  assert.ok(!minimalCustom.includes(EXECUTION_MODE_BLOCK))
+
+  const minimalStructured = fusedMinimalPrompt(ANCHORS.structuredOutputFull, resolveExecutionModeBlock(custom))
+  assert.ok(minimalStructured.includes('## Custom rules\nKeep {{char}} and {{user}} literal.'))
+  assert.ok(minimalStructured.includes(ANCHORS.structuredOutputFull))
 })

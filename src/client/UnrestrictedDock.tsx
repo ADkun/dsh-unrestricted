@@ -7,7 +7,7 @@
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: the conversation composer slot contract.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { UnrestrictedCardInjected } from './controller.ts'
+import type { UnrestrictedCardInjected, UnrestrictedViewSnapshot } from './controller.ts'
 import type { UnrestrictedLocaleKey } from './locales.ts'
 
 /** Full component props assembled by the composer tool-row renderer. */
@@ -23,7 +23,7 @@ export type UnrestrictedDockProps =
  */
 export function UnrestrictedDock(props: UnrestrictedDockProps) {
   const { t, toggle } = props
-  const view = props.useView(snapshot => snapshot)
+  const view = props.useView((snapshot: UnrestrictedViewSnapshot) => snapshot)
   const ready = view.settingsStatus === 'ready' && view.writable
   const state = view.settingsStatus !== 'ready'
     ? 'pending'

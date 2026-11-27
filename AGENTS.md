@@ -3,8 +3,8 @@
 DeepSeek Harness 的「破限模式」插件：一个开关，把执行规则融合进当前预设的
 系统提示词（standard / ptc / cordis / minimal 及运行时可枚举的任意其他预设），
 规则只约束"交付内容"，不接管调用机制；关闭即无痕回滚。
-规则正文有多种可选**模板**（内置「原版」+ `prompts/*.md`）。
-浏览器半边提供设置页一节（开关 + 模板选择器）+ 输入框内部工具栏开关，
+规则正文可由用户自由编辑（`config.customPrompt`，空则用内置「原版」）；`prompts/*.md` 与内置原版只作为编辑器里的**草稿起点**（可一键载入，不自动保存）。
+浏览器半边提供设置页一节（开关 + 提示词编辑器 / 从模板载入）+ 输入框内部工具栏开关，
 两处共用一个控制器。
 
 **治理域身份：自有 fork。** 本仓库只从上游 `yexi-by/dsh-unrestricted` 单向同步，
@@ -16,15 +16,15 @@ DeepSeek Harness 的「破限模式」插件：一个开关，把执行规则融
 
 | 目的 | 命令 | 期望结果 |
 | --- | --- | --- |
-| 运行单元测试 | `pnpm test` | `pass 57` / `fail 0` |
+| 运行单元测试 | `pnpm test` | `pass 62` / `fail 0` |
 | 构建客户端产物 | `pnpm build` | 生成 `lib/client.js` 与 `lib/client.js.map`，无报错 |
-| 类型检查 | `pnpm typecheck` | 仅 3 条基线报错（见下），无新增 |
+| 类型检查 | `pnpm typecheck` | 0 错（v0.5.0 起基线已清零） |
 | 重抓提示词夹具 | `node tools/dump-prompts.mjs --repo <DSH 源码树> --out tests/fixtures` | 重写 `tests/fixtures/*` |
 | 真机验收 | `node tools/verify-live.mjs --repo <DSH 源码树>` | 全绿；需完整源码树，见「已知环境限制」 |
 
-类型检查基线（非本次引入，`master` 上同样存在）：
-`UnrestrictedCard.tsx` 的 `onChange` 回调参数隐式 `any` 与一处 `unknown` 属性访问、
-`UnrestrictedDock.tsx` 的同型隐式 `any`。判定标准是**不新增**，不是清零。
+类型检查基线：历史上 `UnrestrictedCard.tsx` / `UnrestrictedDock.tsx` 存在隐式 `any` 与
+`unknown` 属性访问共 3 条报错；v0.5.0 起通过给 `props.useView` 的 selector 参数与
+`view` 标注 `UnrestrictedViewSnapshot` 已清零。判定标准是**保持 0 错**。
 
 ## 红线
 
@@ -51,8 +51,8 @@ DeepSeek Harness 的「破限模式」插件：一个开关，把执行规则融
 | --- | --- | --- |
 | 宿主半边 `src/node.js` | 装配瀑布拦截、预设探测、Minimal 影子、RPC | [设计](docs/design.md) |
 | 规则与提示词 `src/rules.js` | 锚点校验、内置融合块、契约指纹、降级 | [设计](docs/design.md) |
-| 提示词模板 `src/templates.js` `prompts/` | 扫描 `.md` 模板、解析标题、保留 id `original` | [设计](docs/design.md) |
-| 宿主服务桥 `src/host.js` | 解析宿主包，读取 `config.enabled` / `config.template` | [设计](docs/design.md) |
+| 提示词模板 `src/templates.js` `prompts/` | 扫描 `.md` 模板作为编辑草稿起点、解析标题、保留 id `original` | [设计](docs/design.md) |
+| 宿主服务桥 `src/host.js` | 解析宿主包，提供 `loadHost` / `readEnabled`（`readTemplate` 保留、当前未用） | [设计](docs/design.md) |
 | 浏览器半边 `src/client/` | 设置页一节、输入框开关、共享控制器 | [设计](docs/design.md) |
 | 打包与产物 `tsdown.config.ts` `lib/` | 客户端产物生成与导出 | 本文件「命令」 |
 | 上游同步 `docs/fork-policy.md` | 单向同步、冲突裁决、版本与 tag | 该文件 |
@@ -66,7 +66,6 @@ DeepSeek Harness 的「破限模式」插件：一个开关，把执行规则融
 | [testing-guide.md](docs/testing-guide.md) | 用例总表、模式状态迁移矩阵、人工 review 项 | 改规则或改状态流前 |
 | [fork-policy.md](docs/fork-policy.md) | 不 PR 原则、同步流程、冲突裁决优先级 | 每次上游发版前 |
 | [prompt-fusion.md](docs/prompt-fusion.md) | 融合机制的深度说明（含 en / ja 版） | 调整融合算法时 |
-| [issue-7-recovery.md](docs/issue-7-recovery.md) | 一次装配失败的排查记录 | 排查同类装配故障时 |
 | [prompt-refactor-v0.1.7.md](docs/prompt-refactor-v0.1.7.md) | v0.1.7 提示词重构的背景与取舍 | 理解规则设计来源时 |
 
 面向人的阅读顺序（非施工步骤）：`AGENTS.md` → `docs/design.md` →
@@ -76,8 +75,8 @@ DeepSeek Harness 的「破限模式」插件：一个开关，把执行规则融
 
 | 检查项 | 载体 | 期望结果 |
 | --- | --- | --- |
-| 规则与契约测试 | 机检 | `pnpm test` 退出码 0，`pass 57 fail 0` |
-| 类型不回归 | 机检 | `pnpm typecheck` 新增报错数 = 0（基线 3 条） |
+| 规则与契约测试 | 机检 | `pnpm test` 退出码 0，`pass 62 fail 0` |
+| 类型不回归 | 机检 | `pnpm typecheck` 退出码 0（0 错） |
 | 产物可构建 | 机检 | `pnpm build` 退出码 0，`lib/client.js` 更新 |
 | 融合不越界 | 评 | 对照 [design.md](docs/design.md) 非功能红线逐条核对 |
 | 文档引用真实 | 机检 | 文中命令、路径、文档名逐个存在（见 testing-guide 引用核对项） |

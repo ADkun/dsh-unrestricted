@@ -1,9 +1,6 @@
 /**
  * Browser-half controller for the unrestricted card: binds the `unrestricted`
- * settings namespace (the toggle) and polls the host half's private RPC for
- * per-preset fusion state. Mirrors the card-controller pattern: the apply
- * closure owns the controller, the slot inject face hands hooks and callbacks
- * to the component.
+ * settings namespace (the toggle) and reads per-preset state and previews.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
@@ -12,48 +9,52 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: the ctx.configForms Context merge.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 
-/** The section stored in the `unrestricted` settings namespace. */
+/** The toggle section stored in the `unrestricted` settings namespace. */
 export interface UnrestrictedSettings {
   enabled?: boolean
-  /** Selected prompt-template id; `original` is the built-in block. */
-  template?: string
+  stripHostIdentity?: boolean
+  customPrompt?: string
+}
+
+/** One editable execution-prompt template (index 0 built-in, rest are files). */
+export interface UnrestrictedTemplate {
+  id: string
+  builtin: boolean
+  title?: string
+  text?: string
+  bytes?: number
+  lines?: number
 }
 
 /** Per-preset fusion state reported by the host half. */
 export interface UnrestrictedModeState {
   state: 'off' | 'checking' | 'active' | 'failed'
   issues: string[]
-  /** Display name declared by the preset itself (absent for the four shipped ids). */
+  /** Human name for presets added after this build (undefined for the shipped four). */
   name?: string
-  /** Whether this build ships an exact-anchor rule for the preset id. */
+  /** Whether this build ships a fusion rule for the preset. */
   known?: boolean
-  /** Why the preset failed to activate in this profile, when it did. */
+  /** Host-reported reason the preset cannot be assembled, when broken. */
   broken?: string
-}
-
-/** One selectable execution-mode template offered by the host half. */
-export interface UnrestrictedTemplate {
-  id: string
-  /** True for the built-in block, which has no file behind it. */
-  builtin: boolean
-  /** Display name: the file's `# Heading`, else its id. */
-  title?: string
-  bytes?: number
-  lines?: number
 }
 
 /** Host status endpoint payload. */
 export interface UnrestrictedStatus {
   enabled: boolean
-  /** Selected template id as the host resolved it. */
-  template: string
-  /** Directory `*.md` templates are read from. */
+  stripHostIdentity?: boolean
+  /** Persisted custom execution-mode prompt override, empty when using built-in default. */
+  customPrompt?: string
+  /** Built-in default execution-mode prompt text owned by the host half. */
+  defaultPrompt?: string
+  /** Whether a non-default custom execution-mode prompt is currently active. */
+  isCustomPrompt?: boolean
+  /** Current plugin version reported by the host half. */
+  version?: string
+  /** Directory scanned for editor-starting-point templates. */
   templateDir?: string
-  /** True when the selected id has no file: the built-in block is in use. */
-  templateMissing?: boolean
-  /** Selectable templates; the built-in block comes first. */
-  templates: UnrestrictedTemplate[]
-  /** Template files that could not be used. */
+  /** Selectable prompt templates; the built-in block plus any files found. */
+  templates?: UnrestrictedTemplate[]
+  /** Template files that could not be loaded, with the reason. */
   templateProblems?: { file: string; message: string }[]
   modes: Record<string, UnrestrictedModeState>
 }
@@ -68,7 +69,9 @@ export interface UnrestrictedPreview {
   text?: string
   bytes?: number
   lines?: number
-  /** Why no preview could be built; present when unavailable. */
+  /** Structured error code when unavailable. */
+  errorCode?: string
+  /** Diagnostic reason when unavailable. */
   reason?: string
 }
 
@@ -76,15 +79,22 @@ export interface UnrestrictedPreview {
 export interface UnrestrictedPreviewEntry {
   status: 'loading' | 'ready' | 'failed'
   preview?: UnrestrictedPreview
+  errorCode?: string
   message?: string
 }
 
 /** Full view snapshot the card subscribes to. */
 export interface UnrestrictedViewSnapshot {
-  /** Persisted toggle; undefined until the settings scope first syncs. */
+  /** Persisted toggle; false until the settings scope first syncs. */
   enabled: boolean
-  /** Selected template id from the settings document (immediate, not host-resolved). */
-  template: string
+  /** Persisted host-brand stripping toggle; false until synced. */
+  stripHostIdentity: boolean
+  /** Persisted custom prompt override (LF-normalized); empty when using built-in default. */
+  customPrompt: string
+  /** Built-in default execution-mode prompt text returned by the host status RPC. */
+  defaultPrompt: string
+  /** Whether a custom execution-mode prompt is currently overriding the default. */
+  isCustomPrompt: boolean
   /** Whether the Host document accepts writes. */
   writable: boolean
   /** Settings scope sync state. */
@@ -93,7 +103,7 @@ export interface UnrestrictedViewSnapshot {
   status: UnrestrictedStatus | null
   /** presetId -> fetched deploy preview. */
   previews: Record<string, UnrestrictedPreviewEntry>
-  /** 是否仍有设置写入或状态检查尚未完成。 */
+  /** Whether a settings write or status refresh is in flight. */
   busy: boolean
   /** Last transport/business failure, if any. */
   message?: string
@@ -116,23 +126,30 @@ export interface UnrestrictedCardInjected {
   }
   /** Persist the toggle. */
   setEnabled: (enabled: boolean) => Promise<void>
-  /** Persist the selected prompt template. */
-  setTemplate: (template: string) => Promise<void>
-  /** Flip the persisted toggle (the composer dock button). */
-  toggle: () => Promise<void>
-  /** Re-run the host-side anchor checks and refresh. */
+  /** Persist whether host identity branding is stripped from prompts. */
+  setStripHostIdentity: (strip: boolean) => Promise<void>
+  /** Persist a user-edited execution-mode prompt (clears override when equal to default). */
+  setCustomPrompt: (prompt: string) => Promise<boolean>
+  /** Clear any custom prompt override and restore the built-in default. */
+  resetCustomPrompt: () => Promise<boolean>
+  /** Re-validate runtime state and refresh. */
   recheck: () => Promise<void>
   /** Re-read host status and invalidate cached previews. */
   refresh: () => Promise<void>
   /** Fetch the exact fused prompt this preset would deploy. */
   loadPreview: (presetId: string) => Promise<void>
+  /** Flip the persisted toggle (used by the input-dock chip). */
+  toggle: () => void
 }
 
 const RPC_CHANNEL = '/api'
 const RPC_NAMESPACE = 'dsh-unrestricted'
 const SETTINGS_NS = 'unrestricted'
-/** Id of the built-in block, which has no file behind it. */
-const ORIGINAL_TEMPLATE = 'original'
+
+/** Normalize line endings so YAML/browser values compare identically across OSes. */
+function normalizePromptText(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/\r\n?/g, '\n') : ''
+}
 
 /** Human-readable error text for the banner. */
 function messageOf(error: unknown): string {
@@ -150,7 +167,10 @@ export function createUnrestrictedController(ctx: Context) {
 
   let snapshot: UnrestrictedViewSnapshot = {
     enabled: false,
-    template: ORIGINAL_TEMPLATE,
+    stripHostIdentity: false,
+    customPrompt: '',
+    defaultPrompt: '',
+    isCustomPrompt: false,
     writable: false,
     settingsStatus: 'loading',
     status: null,
@@ -158,7 +178,6 @@ export function createUnrestrictedController(ctx: Context) {
     busy: false,
   }
   const listeners = new Set<() => void>()
-  // 每个预设只接收最近一次请求；清空标记同时废弃所有在途旧预览。
   const previewRequests = new Map<string, symbol>()
   let statusGeneration = 0
   let pendingOperations = 0
@@ -174,12 +193,23 @@ export function createUnrestrictedController(ctx: Context) {
   function publish(): void {
     const settingsSnapshot = settings.getSnapshot()
     const enabled = settingsSnapshot.value?.enabled === true
-    const template = settingsSnapshot.value?.template ?? ORIGINAL_TEMPLATE
-    // Both keys change the deployed text, so both void the fetched previews.
-    if (enabled !== snapshot.enabled || template !== snapshot.template) invalidatePreviews()
+    const stripHostIdentity = settingsSnapshot.value?.stripHostIdentity === true
+    const customPrompt = normalizePromptText(settingsSnapshot.value?.customPrompt)
+    const defaultPrompt = normalizePromptText(snapshot.status?.defaultPrompt)
+    const isCustomPrompt = customPrompt.trim() !== '' && (defaultPrompt === '' || customPrompt !== defaultPrompt)
+    if (
+      enabled !== snapshot.enabled
+      || stripHostIdentity !== snapshot.stripHostIdentity
+      || customPrompt !== snapshot.customPrompt
+    ) {
+      invalidatePreviews()
+    }
     snapshot = {
       enabled,
-      template,
+      stripHostIdentity,
+      customPrompt,
+      defaultPrompt,
+      isCustomPrompt,
       writable: settingsSnapshot.writable,
       settingsStatus: settingsSnapshot.status,
       status: snapshot.status,
@@ -196,7 +226,11 @@ export function createUnrestrictedController(ctx: Context) {
   }
 
   async function call<T>(endpoint: string, payload: unknown): Promise<T> {
-    const result = await connection.rpc.call(RPC_CHANNEL, `${RPC_NAMESPACE}/${endpoint}`, payload) as RpcResult<T>
+    const result = await connection.rpc.call(
+      RPC_CHANNEL,
+      `${RPC_NAMESPACE}/${endpoint}`,
+      payload,
+    ) as RpcResult<T>
     if (!result.ok) throw new Error(result.error.message)
     return result.value
   }
@@ -219,7 +253,11 @@ export function createUnrestrictedController(ctx: Context) {
         const status = await call<UnrestrictedStatus>(endpoint, {})
         if (generation !== statusGeneration) return
         if (clearPreviews) invalidatePreviews()
-        snapshot = { ...snapshot, status, message: undefined }
+        snapshot = {
+          ...snapshot,
+          status,
+          message: undefined,
+        }
       } catch (error) {
         if (generation !== statusGeneration) return
         snapshot = { ...snapshot, message: messageOf(error) }
@@ -231,31 +269,59 @@ export function createUnrestrictedController(ctx: Context) {
     return readStatus('status', clearPreviews)
   }
 
-  /**
-   * Write one settings key, then re-read the host status.
-   * @param key - settings key to persist.
-   * @param value - new value for that key.
-   */
-  function writeSetting<K extends keyof UnrestrictedSettings>(
-    key: K,
-    value: UnrestrictedSettings[K],
-  ): Promise<void> {
-    return whileBusy(async () => {
+  async function updateSetting<K extends keyof UnrestrictedSettings>(
+    field: K,
+    value: NonNullable<UnrestrictedSettings[K]>,
+  ): Promise<boolean> {
+    let accepted = false
+    await whileBusy(async () => {
       try {
-        await settings.set(key, value)
+        accepted = (await settings.set(field, value)) !== false
         await refresh(true)
       } catch (error) {
         snapshot = { ...snapshot, message: messageOf(error) }
+        accepted = false
       }
     })
+    return accepted
   }
 
-  function setEnabled(enabled: boolean): Promise<void> {
-    return writeSetting('enabled', enabled)
+  async function clearCustomPrompt(): Promise<boolean> {
+    let accepted = false
+    await whileBusy(async () => {
+      try {
+        const result = typeof settings.unset === 'function'
+          ? await settings.unset('customPrompt')
+          : await settings.set('customPrompt', '')
+        accepted = result !== false
+        await refresh(true)
+      } catch (error) {
+        snapshot = { ...snapshot, message: messageOf(error) }
+        accepted = false
+      }
+    })
+    return accepted
   }
 
-  function setTemplate(template: string): Promise<void> {
-    return writeSetting('template', template)
+  async function setEnabled(enabled: boolean): Promise<void> {
+    await updateSetting('enabled', enabled)
+  }
+
+  async function setStripHostIdentity(strip: boolean): Promise<void> {
+    await updateSetting('stripHostIdentity', strip)
+  }
+
+  function setCustomPrompt(prompt: string): Promise<boolean> {
+    const normalized = normalizePromptText(prompt)
+    const defaultPrompt = normalizePromptText(snapshot.status?.defaultPrompt)
+    if (normalized.trim() === '' || (defaultPrompt !== '' && normalized === defaultPrompt)) {
+      return clearCustomPrompt()
+    }
+    return updateSetting('customPrompt', normalized)
+  }
+
+  function resetCustomPrompt(): Promise<boolean> {
+    return clearCustomPrompt()
   }
 
   function recheck(): Promise<void> {
@@ -263,8 +329,7 @@ export function createUnrestrictedController(ctx: Context) {
   }
 
   /**
-   * Fetch one preset's deploy preview. The card renders the raw fused prompt,
-   * so the user reads the exact bytes before switching the mode on.
+   * Fetch one preset's deploy preview.
    * @param presetId - preset id from the card's row.
    */
   async function loadPreview(presetId: string): Promise<void> {
@@ -286,7 +351,14 @@ export function createUnrestrictedController(ctx: Context) {
       if (previewRequests.get(presetId) !== request) return
       snapshot = {
         ...snapshot,
-        previews: { ...snapshot.previews, [presetId]: { status: 'failed', message: messageOf(error) } },
+        previews: {
+          ...snapshot.previews,
+          [presetId]: {
+            status: 'failed',
+            errorCode: 'preview-failed',
+            message: messageOf(error),
+          },
+        },
       }
     }
     publish()
@@ -296,8 +368,6 @@ export function createUnrestrictedController(ctx: Context) {
     () => settings.subscribe(publish),
     'dsh-unrestricted: settings mirror',
   )
-  // External profile configuration edits commit through the settings service, which
-  // forwards one document event per commit regardless of namespace.
   ctx.effect(
     () => ctx.remote.$on('settings/document-updated', (namespace?: string) => {
       if (namespace === undefined || namespace === SETTINGS_NS) void refresh(true)
@@ -311,11 +381,15 @@ export function createUnrestrictedController(ctx: Context) {
     face: (): UnrestrictedCardInjected => ({
       hooks: { view },
       setEnabled,
-      setTemplate,
-      toggle: () => setEnabled(!snapshot.enabled),
+      setStripHostIdentity,
+      setCustomPrompt,
+      resetCustomPrompt,
       recheck,
       refresh: () => refresh(true),
       loadPreview,
+      toggle: () => {
+        void setEnabled(!snapshot.enabled)
+      },
     }),
   }
 }

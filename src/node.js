@@ -13,10 +13,11 @@
  *   added after this build) fuses generically. Tools, contexts, and variables
  *   pass through untouched; when disabled the listener returns `next()`
  *   verbatim, so the prompt is byte-identical to the unmodified harness.
- * - The inserted section's text comes from the selected prompt template: the
- *   built-in block, or one `prompts/*.md` file read before the assembly. The
- *   directory is scanned on status / recheck / config change, never in the
- *   waterfall; tools, plans, and the rest of the prompt stay untouched.
+ * - The inserted section's text is the user-edited execution prompt
+ *   (config.customPrompt), defaulting to the built-in block. Markdown files in
+ *   prompts/ are read only as editor starting points for that field: the
+ *   directory is scanned on status / recheck, never in the waterfall; tools,
+ *   plans, and the rest of the prompt stay untouched.
  * - `minimal` registers its persona with `complete: true`, which the registry
  *   restores AFTER the waterfall, so waterfall edits cannot reach it. For
  *   minimal agents (joined, switched via `agent-preset/selected`, or later
@@ -30,17 +31,18 @@
  * - Anchor failures (startup standing-scope check or any live assembly) leave
  *   that prompt unchanged and surface the issue codes in the settings card.
  *
- * The toggle and the selected template id live in the `unrestricted` settings
- * namespace (persisted to $DSH_HOME/profiles/web/cordis.patch.yml). Both affect
- * the NEXT assembly of any live or future agent — never an in-flight request
- * or a logged session event.
+ * The toggle, the host-brand stripping flag, and the custom execution prompt
+ * live in the unrestricted settings namespace (persisted to
+ * $DSH_HOME/profiles/web/cordis.patch.yml). All affect the NEXT assembly of any
+ * live or future agent — never an in-flight request or a logged session event.
  */
-import { loadHost, readEnabled, readTemplate } from './host.js'
+import { loadHost, readEnabled } from './host.js'
 import {
-  ANCHORS, PRESETS, fuseSections, fusedMinimalPrompt, isKnownPreset, renderPreview,
+  ANCHORS, EXECUTION_MODE_BLOCK, PRESETS, fuseSections, fusedMinimalPrompt, isKnownPreset,
+  normalizePromptText, renderPreview, resolveExecutionModeBlock, stripHostIdentityFromAssembly,
 } from './rules.js'
 import { registerRpcRoutes } from './rpc.js'
-import { builtinTemplate, DEFAULT_TEMPLATE_ID, defaultTemplateDir, loadTemplates } from './templates.js'
+import { builtinTemplate, defaultTemplateDir, loadTemplates } from './templates.js'
 
 // Host packages are resolved through the running DSH entry, never through this
 // bundle's own `node_modules` (a `link:` install has none). See ./host.js.
@@ -72,7 +74,7 @@ const renderPrompt = systemPromptModule?.renderPrompt ?? fallbackRender
 export const name = 'dsh-unrestricted'
 
 /** Current plugin package version. */
-export const PLUGIN_VERSION = '0.4.0'
+export const PLUGIN_VERSION = '0.5.0'
 
 /** Services required by this plugin (all base-backed profiles provide these). */
 export const inject = ['settings', 'systemPrompt', 'loader']
@@ -85,8 +87,9 @@ export const inject = ['settings', 'systemPrompt', 'loader']
 export const Config = typeof z?.object === 'function'
   ? z.object({
     enabled: z.boolean().default(false),
-    template: z.string().default(DEFAULT_TEMPLATE_ID),
-  }).default({ enabled: false, template: DEFAULT_TEMPLATE_ID }).volatile()
+    stripHostIdentity: z.boolean().default(false),
+    customPrompt: z.string().default(''),
+  }).default({ enabled: false, stripHostIdentity: false, customPrompt: '' }).volatile()
   : undefined
 
 /** Human-readable error text for status and RPC error branches. */
@@ -99,6 +102,11 @@ function ok(value) {
   return { ok: true, value }
 }
 
+/** Read the config value whether the host passed a schemastery handle or a plain object. */
+function readConfigValue(config) {
+  return typeof config?.get === 'function' ? config.get() : (config ?? {})
+}
+
 /**
  * @param ctx - plugin context carrying settings, systemPrompt, loader, and
  *   optional agentPresets / connection services.
@@ -106,15 +114,20 @@ function ok(value) {
 export function apply(ctx, config) {
   ctx.effect(() => ctx.settings.configure({ auto: false }, ctx.fiber))
 
+  const initialConfig = readConfigValue(config)
+  const initialCustomPrompt = normalizePromptText(initialConfig.customPrompt)
+  const initialPromptBlock = resolveExecutionModeBlock(initialCustomPrompt)
   const state = {
+    active: true,
     enabled: readEnabled(config),
-    /** Selected prompt-template id; unknown ids fall back to the built-in block. */
-    templateId: readTemplate(config) ?? DEFAULT_TEMPLATE_ID,
-    /** Selectable templates: index 0 is always the built-in block. */
+    stripHostIdentity: Boolean(initialConfig.stripHostIdentity),
+    customPrompt: initialCustomPrompt,
+    promptBlock: initialPromptBlock,
+    /** Selectable templates: index 0 is always the built-in block; the rest are editor starting points. */
     templates: [builtinTemplate()],
-    /** Directory scanned for `*.md` template files. */
+    /** Directory scanned for markdown template files (editor starting points). */
     templateDir: defaultTemplateDir(),
-    /** `{ file, message }` rows for template files that could not be used. */
+    /** { file, message } rows for template files that could not be used. */
     templateProblems: [],
     /** presetId -> issue codes; a preset with an empty list is verified. */
     startup: new Map(),
@@ -126,8 +139,12 @@ export function apply(ctx, config) {
     shadows: new Map(),
     /** Minimal agents whose persona was already registered at agent scope by caller. */
     customMinimal: new WeakSet(),
-    /** Fused minimal prompt, computed only after the minimal anchors verify. */
-    fusedMinimal: fusedMinimalPrompt(),
+    /** Minimal agents currently being probed for complete-section ownership. */
+    probingMinimal: new WeakSet(),
+    /** Agents already disposed, guarding async shadow probes against late writes. */
+    disposed: new WeakSet(),
+    /** Precomputed fused minimal prompt for the active prompt block. */
+    fusedMinimal: fusedMinimalPrompt('', initialPromptBlock),
     /** presetId -> last successfully fused top-level live assembly (the deploy preview). */
     fusedText: new Map(),
   }
@@ -137,20 +154,14 @@ export function apply(ctx, config) {
     return [...state.startup.get(presetId) ?? [], ...state.runtime.get(presetId) ?? []]
   }
 
-  /** The selected template entry; index 0 (the built-in block) is the fallback. */
-  function activeTemplate() {
-    return state.templates.find(entry => entry.id === state.templateId) ?? state.templates[0]
-  }
-
   /** Execution-mode section text to fuse into the next assembly. */
   function activeBlock() {
-    return activeTemplate().text
+    return state.promptBlock
   }
 
-  /** Whether the configured template id has no file behind it. */
-  function templateMissing() {
-    return state.templateId !== DEFAULT_TEMPLATE_ID
-      && !state.templates.some(entry => entry.id === state.templateId)
+  /** Whether the user's custom prompt overrides the built-in block. */
+  function isCustomPromptActive() {
+    return state.customPrompt.trim() !== '' && state.promptBlock !== EXECUTION_MODE_BLOCK
   }
 
   let templateLoad
@@ -303,14 +314,6 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Whether one preset may currently be fused. Every preset id is fusible —
-   * unknown ids use the generic rule — so this only reports a failed check.
-   */
-  function usable(presetId) {
-    return state.startup.has(presetId) && modeIssues(presetId).length === 0
-  }
-
-  /**
    * Remove a minimal persona shadow from an agent when it switches preset, is
    * disposed, or unrestricted mode turns off.
    */
@@ -343,21 +346,27 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Synchronize a minimal agent's complete persona shadow with its current
-   * preset and toggle state. If the agent is no longer on `minimal`, any stale
-   * shadow from an earlier blank-session preset selection is disposed.
-   * @param agent - the target agent.
+   * Determine whether a post-assembly section list belongs to a stock
+   * complete-persona minimal agent rather than a custom-persona child override.
+   * On DSH >= 0.2.3, `AssembledSection` exposes `order` and `complete`; on
+   * DSH <= 0.2.2, a complete assembly restores a single `deployment:persona-prefix`
+   * section without `order`.
    */
-  function syncMinimalShadow(agent) {
-    if (!state.enabled || state.fusedMinimal === null) {
-      unshadowMinimal(agent)
-      return
-    }
-    const presetId = resolveAgentPreset(agent)
-    if (presetId !== 'minimal') {
-      unshadowMinimal(agent)
-      return
-    }
+  function isCompleteMinimalAssembly(sections) {
+    const persona = sections.find(section => section.name === 'deployment:persona-prefix')
+    if (persona === undefined) return false
+    if (typeof persona.order === 'number') return persona.complete === true
+    return sections.length === 1
+  }
+
+  /**
+   * Register the fused complete persona shadow directly on a stock minimal
+   * agent. Still handles the duplicate-section error thrown by DSH <= 0.2.2 if
+   * a caller registered a persona in the same scope before probing completed.
+   */
+  function installMinimalShadow(agent) {
+    if (!state.active || !state.enabled || state.disposed.has(agent)) return
+    if (resolveAgentPreset(agent) !== 'minimal') return
     if (state.shadows.has(agent) || state.customMinimal.has(agent)) return
     let dispose
     try {
@@ -365,11 +374,8 @@ export function apply(ctx, config) {
         name: 'deployment:persona-prefix',
         order: 0,
         complete: true,
-        // The fused persona carries no variables: render it literally so a
-        // template's `{{...}}` prose cannot trip the host interpolator.
         interpolate: false,
         text: (context) => {
-          // 结构化工具注册在子代理 scope，不能只查询全局工具目录。
           const hasStructured = context?.agent?.ctx?.tools
             ?.schemas?.(context.agent)
             ?.some(tool => tool.name === 'structured_output') === true
@@ -379,13 +385,44 @@ export function apply(ctx, config) {
         },
       })
     } catch (error) {
-      // 原生委派角色已占用同一名称；保留调用方贡献，在组装时融合。
       if (messageOf(error) !== 'prompt section "deployment:persona-prefix" is already registered in this scope') throw error
       state.customMinimal.add(agent)
       return
     }
     state.shadows.set(agent, dispose)
-    state.fusedText.set('minimal', state.fusedMinimal)
+  }
+
+  /**
+   * Synchronize a minimal agent's complete persona shadow with its current
+   * preset and toggle state. Probes the scope read-only (no `agent`/`session`)
+   * before installing a shadow so DSH >= 0.2.3's latest-registration-wins rule
+   * never overwrites a child subagent's custom non-complete persona.
+   */
+  function syncMinimalShadow(agent) {
+    if (!state.active || !state.enabled || state.disposed.has(agent)) {
+      unshadowMinimal(agent)
+      return
+    }
+    const presetId = resolveAgentPreset(agent)
+    if (presetId !== 'minimal') {
+      unshadowMinimal(agent)
+      return
+    }
+    if (state.shadows.has(agent) || state.customMinimal.has(agent) || state.probingMinimal.has(agent)) return
+    state.probingMinimal.add(agent)
+    void ctx.systemPrompt.assemble({ scope: agent }).then((assembly) => {
+      if (!state.active || !state.enabled || state.disposed.has(agent)) return
+      if (resolveAgentPreset(agent) !== 'minimal') return
+      if (isCompleteMinimalAssembly(assembly.sections)) {
+        installMinimalShadow(agent)
+      } else {
+        state.customMinimal.add(agent)
+      }
+    }).catch(() => {
+      // Agent or scope disposed while probing; ignore transient error.
+    }).finally(() => {
+      state.probingMinimal.delete(agent)
+    })
   }
 
   /** Synchronize minimal persona shadows across all live agents. */
@@ -432,15 +469,18 @@ export function apply(ctx, config) {
     }
     return {
       enabled: state.enabled,
+      stripHostIdentity: state.stripHostIdentity,
+      customPrompt: state.customPrompt,
+      defaultPrompt: EXECUTION_MODE_BLOCK,
+      isCustomPrompt: isCustomPromptActive(),
       version: PLUGIN_VERSION,
-      /** Selected template id and the directory files are read from. */
-      template: state.templateId,
+      /** Directory scanned for editor-starting-point templates. */
       templateDir: state.templateDir,
-      templateMissing: templateMissing(),
       templates: state.templates.map(entry => ({
         id: entry.id,
         builtin: entry.builtin,
         title: entry.title,
+        text: entry.text,
         bytes: entry.bytes,
         lines: entry.lines,
       })),
@@ -505,8 +545,10 @@ export function apply(ctx, config) {
           reason: fused.issues.join('; '),
         }
       }
-      const variables = { ...assembly.variables, ...previewVariables() }
-      const text = renderPreview({ ...assembly, sections: fused.sections, variables }, renderPrompt)
+      let previewAssembly = { ...assembly, sections: fused.sections }
+      if (state.stripHostIdentity) previewAssembly = stripHostIdentityFromAssembly(previewAssembly)
+      const variables = { ...previewAssembly.variables, ...previewVariables() }
+      const text = renderPreview({ ...previewAssembly, variables }, renderPrompt)
       return { presetId, available: true, source: 'standing', ...summarize(text) }
     } catch (error) {
       return {
@@ -557,7 +599,7 @@ export function apply(ctx, config) {
 
   ctx.on('system-prompt/assemble', async (assembly, context, next) => {
     const original = await next()
-    if (!state.enabled) return original
+    if (!state.enabled && !state.stripHostIdentity) return original
     const agent = context.agent
     if (agent === undefined) return original
     const presetId = resolveAgentPreset(agent, original.sections)
@@ -565,55 +607,68 @@ export function apply(ctx, config) {
       unshadowMinimal(agent)
       return original
     }
+
+    let current = original
+
     if (presetId === 'minimal') {
-      // If the minimal shadow is already installed on this agent, `assemble()`
-      // will restore the complete persona right after the waterfall returns;
-      // record the live preview text and let it finish.
-      if (state.shadows.has(agent) && state.fusedMinimal !== null) {
-        state.fusedText.set('minimal', state.fusedMinimal)
-        return original
-      }
-      // An agent missed by the enable sweep (a request that raced the toggle)
-      // registers its shadow now for subsequent assemblies, and also returns
-      // the fused minimal section for this assembly when possible.
-      await ensureCheck('minimal')
-      syncMinimalShadow(agent)
-      if (state.customMinimal.has(agent) && usable('minimal')) {
-        const fused = fuseSections(original.sections, 'minimal', { isSubagent: true, block: activeBlock() })
-        if (fused.issues !== undefined) {
-          state.runtime.set('minimal', fused.issues)
-          return original
+      if (state.enabled) {
+        if (!state.shadows.has(agent) && !state.customMinimal.has(agent)) {
+          const persona = current.sections.find(section => section.name === 'deployment:persona-prefix')
+          if (persona !== undefined && typeof persona.order === 'number') {
+            if (persona.complete === true) installMinimalShadow(agent)
+            else state.customMinimal.add(agent)
+          } else {
+            installMinimalShadow(agent)
+          }
         }
-        state.runtime.delete('minimal')
-        return { ...original, sections: fused.sections }
+        if (state.customMinimal.has(agent)) {
+          const fused = fuseSections(current.sections, 'minimal', {
+            isSubagent: true,
+            block: activeBlock(),
+          })
+          if (fused.issues !== undefined) {
+            state.runtime.set('minimal', fused.issues)
+            return state.stripHostIdentity ? stripHostIdentityFromAssembly(current) : current
+          }
+          state.runtime.delete('minimal')
+          current = { ...current, sections: fused.sections }
+        } else if (state.shadows.has(agent) && state.fusedMinimal !== null) {
+          state.fusedText.set('minimal', state.fusedMinimal)
+        }
+      } else if (state.shadows.has(agent)) {
+        unshadowMinimal(agent)
       }
-      return original
+      return state.stripHostIdentity ? stripHostIdentityFromAssembly(current) : current
     }
-    // If this blank session was previously `minimal` and switched to another
-    // preset before its first turn, drop the stale minimal shadow now so it
-    // cannot overwrite the new preset's sections after the waterfall.
+
     if (state.shadows.has(agent)) {
       unshadowMinimal(agent)
     }
-    if (!usable(presetId)) return original
-    const isSubagent = original.contexts.some(entry => entry.name === 'subagent:delegation')
-    const fused = fuseSections(original.sections, presetId, { isSubagent, block: activeBlock() })
-    if (fused.issues !== undefined) {
-      state.runtime.set(presetId, fused.issues)
-      return original
-    }
-    state.runtime.delete(presetId)
-    // Keep the deployed top-level fusion available for the card's preview.
-    // Subagents may carry custom personas or restricted sections, so they do
-    // not overwrite the preset's top-level preview cache.
-    if (!isSubagent) {
-      try {
-        state.fusedText.set(presetId, renderPreview({ ...original, sections: fused.sections }, renderPrompt))
-      } catch {
-        state.fusedText.delete(presetId) // an unresolvable variable only costs the preview
+
+    if (state.enabled) {
+      const isSubagent = current.contexts.some(entry => entry.name === 'subagent:delegation')
+      const fused = fuseSections(current.sections, presetId, {
+        isSubagent,
+        block: activeBlock(),
+      })
+      if (fused.issues !== undefined) {
+        state.runtime.set(presetId, fused.issues)
+        return state.stripHostIdentity ? stripHostIdentityFromAssembly(current) : current
+      }
+      state.runtime.delete(presetId)
+      current = { ...current, sections: fused.sections }
+      // Keep the deployed top-level fusion available for the card's live preview.
+      // Subagents may carry custom personas, so they do not overwrite it.
+      if (!isSubagent) {
+        try {
+          state.fusedText.set(presetId, renderPreview({ ...original, sections: fused.sections }, renderPrompt))
+        } catch {
+          state.fusedText.delete(presetId)
+        }
       }
     }
-    return { ...original, sections: fused.sections }
+
+    return state.stripHostIdentity ? stripHostIdentityFromAssembly(current) : current
   })
 
   ctx.on('agent/created', ({ agent }) => {
@@ -634,30 +689,29 @@ export function apply(ctx, config) {
   })
 
   ctx.on('agent/disposed', ({ agent }) => {
+    state.disposed.add(agent)
     state.customMinimal.delete(agent)
     unshadowMinimal(agent)
   })
 
   ctx.effect(() => {
     const unwatch = ctx.on('loader/volatile-update', () => {
-      const enabled = readEnabled(config)
-      const templateId = readTemplate(config) ?? DEFAULT_TEMPLATE_ID
-      const toggled = enabled !== state.enabled
-      const retemplated = templateId !== state.templateId
-      if (!toggled && !retemplated) return
+      const nextConfig = readConfigValue(config)
+      const enabled = Boolean(nextConfig.enabled)
+      const nextCustomPrompt = normalizePromptText(nextConfig.customPrompt)
+      state.stripHostIdentity = Boolean(nextConfig.stripHostIdentity)
+      const promptChanged = nextCustomPrompt !== state.customPrompt
+      state.customPrompt = nextCustomPrompt
+      state.promptBlock = resolveExecutionModeBlock(nextCustomPrompt)
+      if (promptChanged) refreshFusion()
+      if (enabled === state.enabled) return
       state.enabled = enabled
-      state.templateId = templateId
-      if (toggled) {
-        if (enabled) onEnable()
-        else onDisable()
-        return
-      }
-      // Template-only change: the mode text moves, the anchor contract does not.
-      // Shadows read state.fusedMinimal on every assembly, so no re-sweep is due.
-      refreshFusion()
+      if (enabled) onEnable()
+      else onDisable()
     })
     if (state.enabled) onEnable()
     return () => {
+      state.active = false
       state.enabled = false
       unwatch()
       clearShadows()

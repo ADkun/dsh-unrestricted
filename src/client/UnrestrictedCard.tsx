@@ -1,17 +1,84 @@
 /**
- * The unrestricted settings page: one persisted toggle, the per-preset fusion
- * state reported by the host half, and the deploy preview for the preset the
- * user is inspecting. The preset roster is whatever the host reports, so a
- * preset added after this build (a user-authored preset, or any future one)
- * appears here without a plugin change. All data arrives through the props
- * shares; the only component-local state is which preview is open.
+ * The unrestricted settings view:
+ * - Master toggle card with native Switch, status Tag, and scope boundary notes
+ * - Editable execution-mode prompt card with save, discard, and reset-to-default
+ * - Per-preset coverage list with StateDot, Tag, preview drawer, and one-click copy
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-// Type-only: the settings section slot contract.
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { UnrestrictedCardInjected, UnrestrictedModeState, UnrestrictedStatus, UnrestrictedTemplate } from './controller.ts'
+import type {
+  UnrestrictedCardInjected,
+  UnrestrictedModeState,
+  UnrestrictedPreviewEntry,
+  UnrestrictedViewSnapshot,
+} from './controller.ts'
 import type { UnrestrictedLocaleKey } from './locales.ts'
+
+type TagTone = 'neutral' | 'success' | 'danger' | 'warning' | 'info' | 'outline'
+type StateDotState = 'done' | 'error' | 'idle'
+
+/** Local visual shims so the card renders without the shared primitives package. */
+function Button(props: {
+  variant?: 'primary' | 'outline' | 'ghost' | 'toolbar'
+  size?: 'sm'
+  disabled?: boolean
+  onClick?: () => void
+  children?: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className="dsh-unrestricted-btn"
+      data-variant={props.variant ?? 'outline'}
+      disabled={props.disabled}
+      onClick={props.onClick}
+    >
+      {props.children}
+    </button>
+  )
+}
+
+function Switch(props: {
+  checked: boolean
+  disabled?: boolean
+  label?: string
+  onChange?: (checked: boolean) => void
+}) {
+  return (
+    <input
+      type="checkbox"
+      className="dsh-unrestricted-switch"
+      checked={props.checked}
+      disabled={props.disabled}
+      aria-label={props.label}
+      onChange={(event) => { props.onChange?.(event.target.checked) }}
+    />
+  )
+}
+
+function Tag(props: { tone?: TagTone; children?: ReactNode }) {
+  return <span className="dsh-unrestricted-tag" data-tone={props.tone ?? 'neutral'}>{props.children}</span>
+}
+
+function StateDot(props: { state?: StateDotState }) {
+  return <span className="dsh-unrestricted-dot" data-state={props.state ?? 'idle'} />
+}
+
+/** Compact byte counter mirroring the shared primitive's format. */
+function fileSizeText(bytes: number): string {
+  return bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB'
+}
+
+/** Copy text to the clipboard, reporting whether the browser accepted it. */
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /** Full component props assembled by the Settings slot renderer. */
 export type UnrestrictedCardProps =
@@ -19,84 +86,190 @@ export type UnrestrictedCardProps =
   & PropsLocale<'settings.unrestricted'>
   & InjectFace<UnrestrictedCardInjected>
 
-/** One rendered mode row. */
-interface ModeRow {
+/** Mode rows in display order, with their locale label and description keys. */
+const MODE_ROWS: ReadonlyArray<{
   id: string
-  mode: UnrestrictedModeState | undefined
-  /** Localized label for the four shipped presets; the preset's own name otherwise. */
+  labelKey: UnrestrictedLocaleKey
+  descKey: UnrestrictedLocaleKey
+  presetKey: UnrestrictedLocaleKey
+}> = [
+  { id: 'standard', labelKey: 'modeStandard', descKey: 'modeStandardDesc', presetKey: 'presetStandard' },
+  { id: 'ptc', labelKey: 'modePtc', descKey: 'modePtcDesc', presetKey: 'presetPtc' },
+  { id: 'cordis', labelKey: 'modeCordis', descKey: 'modeCordisDesc', presetKey: 'presetCordis' },
+  { id: 'minimal', labelKey: 'modeMinimal', descKey: 'modeMinimalDesc', presetKey: 'presetMinimal' },
+]
+
+/** The four shipped preset ids, in display order; any other id sorts after. */
+const KNOWN_PRESET_IDS: readonly string[] = MODE_ROWS.map((row) => row.id)
+
+/** One rendered coverage row: shipped ids carry localized copy, others their own name. */
+interface DisplayRow {
+  id: string
   label: string
+  desc?: string
+  presetTag?: string
 }
 
-/** Shipped presets keep their localized labels and their display order. */
-const KNOWN_LABELS: Readonly<Record<string, UnrestrictedLocaleKey>> = {
-  standard: 'modeStandard',
-  ptc: 'modePtc',
-  cordis: 'modeCordis',
-  minimal: 'modeMinimal',
-}
-
-/** Shipped order, so a roster read never reshuffles the four familiar rows. */
-const KNOWN_ORDER = ['standard', 'ptc', 'cordis', 'minimal']
-
-/** Known host issue codes mapped to localized dictionary keys. */
+/** Known host issue strings/codes mapped to localized dictionary keys. */
 const ISSUE_LOCALE_KEYS: Readonly<Record<string, UnrestrictedLocaleKey>> = {
-  'missing-identity': 'issueIdentity',
   'missing-persona': 'issuePersona',
-  'missing-plan': 'issuePlan',
-  'missing-ptc-only': 'issuePtcOnly',
-  'missing-structured-output': 'issueStructuredOutput',
-}
-
-/** One row of the host's unreadable-template report. */
-type TemplateProblem = NonNullable<UnrestrictedStatus['templateProblems']>[number]
-
-/** Human-readable summary of the template files the host could not use. */
-function formatTemplateProblems(problems: readonly TemplateProblem[]): string {
-  return problems.map((problem) => `${problem.file}: ${problem.message}`).join('; ')
+  'preset persona changed': 'issuePersona',
 }
 
 /** Locale key for one mode state. */
 function stateKey(mode: UnrestrictedModeState | undefined): UnrestrictedLocaleKey {
   switch (mode?.state) {
     case 'active': return 'stateActive'
-    case 'checking': return 'stateChecking'
     case 'failed': return 'stateValidationFailed'
     default: return 'stateOff'
   }
 }
 
+/** Map mode state to native StateDot state. */
+function dotStateOf(mode: UnrestrictedModeState | undefined): StateDotState {
+  switch (mode?.state) {
+    case 'active': return 'done'
+    case 'failed': return 'error'
+    default: return 'idle'
+  }
+}
+
+/** Map mode state to native Tag tone. */
+function modeTagTone(mode: UnrestrictedModeState | undefined): TagTone {
+  switch (mode?.state) {
+    case 'active': return 'success'
+    case 'failed': return 'danger'
+    default: return 'neutral'
+  }
+}
+
+/** Friendly localized text for top-level RPC or settings errors. */
+function localizeBannerError(message: string, t: (key: UnrestrictedLocaleKey) => string): string {
+  const lower = message.toLowerCase()
+  if (lower.includes('disconnect') || lower.includes('closed') || lower.includes('network') || lower.includes('timeout')) {
+    return t('errorRpcDisconnected')
+  }
+  return `${t('operationFailed')}${message}`
+}
+
+/** Friendly localized text for preview failures. */
+function localizePreviewError(
+  entry: UnrestrictedPreviewEntry,
+  t: (key: UnrestrictedLocaleKey) => string,
+): string {
+  const code = entry.preview?.errorCode ?? entry.errorCode
+  if (code === 'unsupported-preset') return t('errorUnsupportedPreset')
+  if (code === 'missing-persona') return t('errorMissingPersona')
+  if (code === 'preview-failed') return t('errorPreviewFailed')
+  const detail = entry.preview?.reason ?? entry.message
+  return detail !== undefined && detail.trim() !== ''
+    ? `${t('previewUnavailable')}${detail}`
+    : t('errorPreviewFailed')
+}
+
+/** UTF-8 byte length of a string in browser environments. */
+function utf8ByteLength(text: string): number {
+  return new TextEncoder().encode(text).length
+}
+
 /**
- * Render the unrestricted settings page.
- * @param props - locale copy, the card snapshot, and its actions.
- * @returns the section body.
+ * Render the unrestricted configuration cards.
  */
 export function UnrestrictedCard(props: UnrestrictedCardProps) {
   const { t, loadPreview } = props
-  const view = props.useView(snapshot => snapshot)
+  const view: UnrestrictedViewSnapshot = props.useView((snapshot: UnrestrictedViewSnapshot) => snapshot)
   const status = view.status
-  const templates = status?.templates ?? []
   const [openPreview, setOpenPreview] = useState<string | null>(null)
+  const [copiedPreset, setCopiedPreset] = useState<string | null>(null)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [hasLocalEdit, setHasLocalEdit] = useState(false)
+  const [promptFeedback, setPromptFeedback] = useState<'saved' | 'reset' | null>(null)
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const openEntry = openPreview === null ? undefined : view.previews[openPreview]
 
-  // When a refresh/recheck/toggle invalidates the preview map while a preview
-  // drawer is open, automatically reload that preset's preview.
+  // The host reports every preset this profile can run (shipped four first, then
+  // any user-authored or future preset). Show them all, not just the four shipped.
+  const modes = status?.modes ?? {}
+  const rows: DisplayRow[] = [
+    ...MODE_ROWS.map((row) => ({
+      id: row.id,
+      label: t(row.labelKey),
+      desc: t(row.descKey),
+      presetTag: t(row.presetKey),
+    })),
+    ...Object.keys(modes)
+      .filter((id) => !KNOWN_PRESET_IDS.includes(id))
+      .sort()
+      .map((id) => ({ id, label: modes[id]?.name ?? id })),
+  ]
+
+  const effectivePrompt = view.customPrompt.trim() !== '' ? view.customPrompt : view.defaultPrompt
+  const normalizedDraft = draft.replace(/\r\n?/g, '\n')
+  const isDirty = hasLocalEdit && normalizedDraft !== effectivePrompt
+  const isDraftEmpty = normalizedDraft.trim() === ''
+  const editorReady = effectivePrompt !== '' || view.status !== null
+  const controlsEditable = view.writable && view.settingsStatus === 'ready' && !view.busy
+  const canSave = controlsEditable && isDirty && !isDraftEmpty
+  const canReset = controlsEditable
+    && (view.isCustomPrompt || (view.defaultPrompt !== '' && normalizedDraft !== view.defaultPrompt))
+
+  // Keep the editor draft synced with the active prompt until the user starts editing.
+  useEffect(() => {
+    if (!hasLocalEdit) {
+      setDraft(effectivePrompt)
+    }
+  }, [effectivePrompt, hasLocalEdit])
+
+  useEffect(() => () => {
+    if (feedbackTimerRef.current !== null) clearTimeout(feedbackTimerRef.current)
+  }, [])
+
+  // When a refresh/toggle invalidates the preview map while a preview drawer
+  // is open, automatically reload that preset's preview.
   useEffect(() => {
     if (openPreview !== null && openEntry === undefined) {
       void loadPreview(openPreview)
     }
   }, [openPreview, openEntry, loadPreview])
 
-  const modes = status?.modes ?? {}
-  const knownRows: ModeRow[] = KNOWN_ORDER
-    .filter(id => modes[id] !== undefined)
-    .map(id => ({ id, mode: modes[id], label: t(KNOWN_LABELS[id] as UnrestrictedLocaleKey) }))
-  const customRows: ModeRow[] = Object.keys(modes)
-    .filter(id => !KNOWN_ORDER.includes(id))
-    .sort()
-    .map(id => ({ id, mode: modes[id], label: modes[id]?.name ?? id }))
-  const rows = [...knownRows, ...customRows]
+  function showPromptFeedback(kind: 'saved' | 'reset'): void {
+    setPromptFeedback(kind)
+    if (feedbackTimerRef.current !== null) clearTimeout(feedbackTimerRef.current)
+    feedbackTimerRef.current = setTimeout(() => {
+      setPromptFeedback(null)
+      feedbackTimerRef.current = null
+    }, 2600)
+  }
 
-  const hasFailedMode = Object.values(modes).some(mode => mode.state === 'failed')
+  async function handleSavePrompt(): Promise<void> {
+    if (!canSave) return
+    const saved = await props.setCustomPrompt(draft)
+    if (!saved) return
+    const matchedDefault = view.defaultPrompt !== '' && normalizedDraft === view.defaultPrompt
+    setHasLocalEdit(false)
+    showPromptFeedback(matchedDefault ? 'reset' : 'saved')
+  }
+
+  function handleDiscardPrompt(): void {
+    setDraft(effectivePrompt)
+    setHasLocalEdit(false)
+    setPromptFeedback(null)
+  }
+
+  async function handleResetPrompt(): Promise<void> {
+    if (!canReset) return
+    if (view.isCustomPrompt) {
+      const cleared = await props.resetCustomPrompt()
+      if (!cleared) return
+    }
+    setDraft(view.defaultPrompt)
+    setHasLocalEdit(false)
+    showPromptFeedback('reset')
+  }
+
+  const hasFailedMode = status !== null
+    && Object.values(status.modes).some(mode => mode.state === 'failed')
   const summaryKey: UnrestrictedLocaleKey = view.settingsStatus === 'loading'
     ? 'summaryLoading'
     : view.settingsStatus === 'unavailable'
@@ -104,9 +277,11 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
       : hasFailedMode
         ? 'summaryValidationFailed'
         : view.enabled ? 'summaryEnabled' : 'summaryDisabled'
-  const summaryState = view.settingsStatus === 'ready'
-    ? hasFailedMode ? 'error' : view.enabled ? 'active' : 'off'
-    : 'pending'
+  const summaryTone: TagTone = view.settingsStatus !== 'ready'
+    ? 'neutral'
+    : hasFailedMode
+      ? 'warning'
+      : view.enabled ? 'success' : 'neutral'
 
   /** Toggle one preset's preview, fetching the current bytes on first open. */
   function togglePreview(presetId: string): void {
@@ -119,123 +294,322 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
     if (entry === undefined || entry.status === 'failed') void props.loadPreview(presetId)
   }
 
-  /** Localize known anchor issues; pass dynamic probe errors through as-is. */
+  /** Copy one preset's preview prompt text to the clipboard. */
+  async function handleCopyPreview(presetId: string, text: string | undefined): Promise<void> {
+    if (text === undefined || text === '') return
+    const accepted = await writeClipboard(text)
+    if (!accepted) return
+    setCopiedPreset(presetId)
+    setTimeout(() => {
+      setCopiedPreset(current => (current === presetId ? null : current))
+    }, 1800)
+  }
+
+  /** Localize known issues; fall back gracefully. */
   function formatIssues(issues: readonly string[]): string {
     return issues
       .map((issue) => {
         const key = ISSUE_LOCALE_KEYS[issue]
         return key !== undefined ? t(key) : issue
       })
-      .join('; ')
+      .join('；')
   }
 
   return (
-    <div className="dsh-unrestricted-card">
-      <div className="dsh-unrestricted-head">
-        <h3 className="dsh-unrestricted-title">{t('title')}</h3>
-        <span className="dsh-unrestricted-summaryStatus" data-state={summaryState}>{t(summaryKey)}</span>
-      </div>
-      <div className="dsh-unrestricted-content">
-        <p className="dsh-unrestricted-description">{t('description')}</p>
-        <label className="dsh-unrestricted-toggle">
-          <input
-            type="checkbox"
-            checked={view.enabled}
-            disabled={!view.writable || view.settingsStatus !== 'ready' || view.busy}
-            onChange={(event) => { void props.setEnabled(event.target.checked) }}
-          />
-          <span>{t('toggle')}</span>
-        </label>
-        {view.settingsStatus === 'ready' && templates.length > 0 && (
-          <div className="dsh-unrestricted-field">
-            <label className="dsh-unrestricted-fieldLabel" htmlFor="dsh-unrestricted-template">
-              {t('templateLabel')}
-            </label>
-            <select
-              id="dsh-unrestricted-template"
-              className="dsh-unrestricted-select"
-              value={view.template}
-              disabled={!view.writable || view.settingsStatus !== 'ready' || view.busy}
-              onChange={(event: { target: { value: string } }) => { void props.setTemplate(event.target.value) }}
-            >
-              {status?.templateMissing === true
-                && !templates.some((template: UnrestrictedTemplate) => template.id === view.template) && (
-                <option value={view.template}>{view.template} · {t('templateMissingTag')}</option>
-              )}
-              {templates.map((template: UnrestrictedTemplate) => (
-                <option key={template.id} value={template.id}>
-                  {template.builtin === true ? t('templateOriginal') : (template.title ?? template.id)}
-                </option>
-              ))}
-            </select>
+    <div className="dsh-unrestricted-root" aria-busy={view.busy}>
+      {/* Card 1: Master Toggle */}
+      <section className="dsh-unrestricted-card" aria-labelledby="dsh-unrestricted-main-title">
+        <div className="dsh-unrestricted-header">
+          <div className="dsh-unrestricted-headerTitle">
+            <h3 id="dsh-unrestricted-main-title" className="dsh-unrestricted-title">{t('title')}</h3>
+            <Tag tone={summaryTone}>{t(summaryKey)}</Tag>
+            {view.settingsStatus === 'ready' && view.stripHostIdentity && (
+              <Tag tone="outline">{t('stripHostBadge')}</Tag>
+            )}
+            {view.settingsStatus === 'ready' && view.isCustomPrompt && (
+              <Tag tone="info">{t('customPromptBadge')}</Tag>
+            )}
           </div>
-        )}
-        {status?.templateMissing === true && (
-          <p className="dsh-unrestricted-error">{t('templateMissing')}</p>
-        )}
-        {status?.templateDir !== undefined && (
-          <p className="dsh-unrestricted-note">{t('templateNote')}<code>{status.templateDir}</code></p>
-        )}
-        {(status?.templateProblems?.length ?? 0) > 0 && (
-          <p className="dsh-unrestricted-note">
-            {t('templateProblems')}
-            {formatTemplateProblems(status?.templateProblems ?? [])}
-          </p>
-        )}
+          <div className="dsh-unrestricted-headerControls">
+            <span className="dsh-unrestricted-switchLabel">{t('toggle')}</span>
+            <Switch
+              checked={view.enabled}
+              disabled={!view.writable || view.settingsStatus !== 'ready' || view.busy}
+              label={t('toggle')}
+              onChange={(checked) => { void props.setEnabled(checked) }}
+            />
+          </div>
+        </div>
+        <p className="dsh-unrestricted-description">{t('description')}</p>
+        <p className="dsh-unrestricted-note">{t('scopeNote')}</p>
+        <div className="dsh-unrestricted-optionRow">
+          <div className="dsh-unrestricted-optionCopy">
+            <span className="dsh-unrestricted-modeName">{t('stripHostTitle')}</span>
+            <p className="dsh-unrestricted-note">{t('stripHostDesc')}</p>
+          </div>
+          <Switch
+            checked={view.stripHostIdentity}
+            disabled={!view.writable || view.settingsStatus !== 'ready' || view.busy}
+            label={t('stripHostTitle')}
+            onChange={(checked) => { void props.setStripHostIdentity(checked) }}
+          />
+        </div>
         {view.settingsStatus === 'loading' && (
-          <p className="dsh-unrestricted-note">{t('settingsLoading')}</p>
+          <p className="dsh-unrestricted-note" role="status">{t('settingsLoading')}</p>
         )}
         {view.settingsStatus === 'unavailable' && (
-          <p className="dsh-unrestricted-note">{t('settingsUnavailable')}</p>
+          <p className="dsh-unrestricted-banner" data-tone="info" role="status">{t('settingsUnavailable')}</p>
         )}
         {view.message !== undefined && (
-          <p className="dsh-unrestricted-error">{t('operationFailed')}{view.message}</p>
+          <p className="dsh-unrestricted-banner" data-tone="error" role="alert">
+            {localizeBannerError(view.message, t)}
+          </p>
         )}
-        <h4 className="dsh-unrestricted-statusTitle">{t('statusTitle')}</h4>
+      </section>
+
+      {/* Card 2: Editable Execution Prompt */}
+      <section className="dsh-unrestricted-card" aria-labelledby="dsh-unrestricted-prompt-title">
+        <div className="dsh-unrestricted-header">
+          <div className="dsh-unrestricted-headerTitle">
+            <h4 id="dsh-unrestricted-prompt-title" className="dsh-unrestricted-subtitle">
+              {t('promptEditorTitle')}
+            </h4>
+            <Tag tone={view.isCustomPrompt ? 'info' : 'neutral'}>
+              {t(view.isCustomPrompt ? 'promptStateCustom' : 'promptStateDefault')}
+            </Tag>
+            {isDirty && (
+              <Tag tone="warning">{t('promptStateUnsaved')}</Tag>
+            )}
+          </div>
+          <div className="dsh-unrestricted-headerControls">
+            {view.isCustomPrompt && !editorOpen && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!controlsEditable}
+                onClick={() => { void handleResetPrompt() }}
+              >
+                {t('promptEditorReset')}
+              </Button>
+            )}
+            <Button
+              variant={editorOpen ? 'toolbar' : 'outline'}
+              size="sm"
+              onClick={() => { setEditorOpen(open => !open) }}
+            >
+              {t(editorOpen ? 'closePromptEditor' : 'openPromptEditor')}
+            </Button>
+          </div>
+        </div>
+        <p className="dsh-unrestricted-note">{t('promptEditorDesc')}</p>
+        {status?.templateDir !== undefined && (
+          <p className="dsh-unrestricted-note">
+            {t('templateNote')}
+            <span className="dsh-unrestricted-mono">{status.templateDir}</span>
+          </p>
+        )}
+        {status?.templateProblems !== undefined && status.templateProblems.length > 0 && (
+          <p className="dsh-unrestricted-banner" data-tone="info" role="status">
+            {t('templateProblems')}
+            {status.templateProblems.map(problem => problem.file).join('、')}
+          </p>
+        )}
+
+        {editorOpen && (
+          <div className="dsh-unrestricted-editor">
+            {!editorReady ? (
+              <p className="dsh-unrestricted-note" role="status">{t('promptEditorLoading')}</p>
+            ) : (
+              <>
+                <div className="dsh-unrestricted-previewHeader">
+                  <p className="dsh-unrestricted-previewMeta">
+                    {draft === '' ? 0 : draft.split('\n').length} {t('previewSize')}
+                    {` · ${draft.length} ${t('promptEditorChars')} · ${fileSizeText(utf8ByteLength(draft))}`}
+                  </p>
+                  <span className="dsh-unrestricted-previewMeta">{t('promptEditorShortcutHint')}</span>
+                </div>
+                {(status?.templates?.length ?? 0) > 0 && (
+                  <div className="dsh-unrestricted-optionRow">
+                    <span className="dsh-unrestricted-switchLabel">{t('templateLoadLabel')}</span>
+                    <select
+                      className="dsh-unrestricted-select"
+                      aria-label={t('templateLoadLabel')}
+                      disabled={!controlsEditable}
+                      value=""
+                      onChange={(event) => {
+                        const chosen = status?.templates?.find(item => item.id === event.target.value)
+                        if (chosen === undefined) return
+                        setDraft(chosen.text ?? '')
+                        setHasLocalEdit(true)
+                        setPromptFeedback(null)
+                      }}
+                    >
+                      <option value="">{t('templateLoadLabel')}…</option>
+                      {status?.templates?.map(item => (
+                        <option key={item.id} value={item.id}>
+                          {item.builtin ? t('promptStateDefault') : (item.title ?? item.id)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <textarea
+                  className="dsh-unrestricted-editorInput"
+                  aria-label={t('promptEditorTitle')}
+                  placeholder={t('promptEditorPlaceholder')}
+                  spellCheck={false}
+                  value={draft}
+                  disabled={!controlsEditable}
+                  onChange={(event) => {
+                    setDraft(event.target.value)
+                    setHasLocalEdit(true)
+                    setPromptFeedback(null)
+                  }}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && canSave) {
+                      event.preventDefault()
+                      void handleSavePrompt()
+                    }
+                  }}
+                />
+                <div className="dsh-unrestricted-editorFooter">
+                  <p
+                    className="dsh-unrestricted-editorStatus"
+                    data-tone={isDraftEmpty ? 'warning' : promptFeedback !== null ? 'success' : undefined}
+                    role="status"
+                  >
+                    {isDraftEmpty
+                      ? t('promptEditorEmptyHint')
+                      : promptFeedback === 'saved'
+                        ? t('promptEditorSaved')
+                        : promptFeedback === 'reset'
+                          ? t('promptEditorResetDone')
+                          : ''}
+                  </p>
+                  <div className="dsh-unrestricted-headerControls">
+                    {isDirty && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={view.busy}
+                        onClick={handleDiscardPrompt}
+                      >
+                        {t('promptEditorDiscard')}
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!canReset}
+                      onClick={() => { void handleResetPrompt() }}
+                    >
+                      {t('promptEditorReset')}
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={!canSave}
+                      onClick={() => { void handleSavePrompt() }}
+                    >
+                      {t('promptEditorSave')}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Card 3: Mode Coverage & Prompt Previews */}
+      <section className="dsh-unrestricted-card" aria-labelledby="dsh-unrestricted-modes-title">
+        <div className="dsh-unrestricted-header">
+          <div className="dsh-unrestricted-headerTitle">
+            <h4 id="dsh-unrestricted-modes-title" className="dsh-unrestricted-subtitle">{t('statusTitle')}</h4>
+          </div>
+          <div className="dsh-unrestricted-headerControls">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={view.busy}
+              onClick={() => { void props.refresh() }}
+            >
+              {t('refresh')}
+            </Button>
+          </div>
+        </div>
+        <p className="dsh-unrestricted-note">{t('statusSubtitle')}</p>
+
         <ul className="dsh-unrestricted-modes">
           {rows.map((row) => {
+            const mode = status?.modes[row.id]
             const entry = view.previews[row.id]
             const isOpen = openPreview === row.id
+            const previewText = entry?.preview?.text
             return (
               <li key={row.id} className="dsh-unrestricted-mode">
-                <span className="dsh-unrestricted-dot" data-state={row.mode?.state ?? 'off'} />
-                <span className="dsh-unrestricted-modeName">{row.label}</span>
-                <span className="dsh-unrestricted-modeState">{t(stateKey(row.mode))}</span>
-                <code className="dsh-unrestricted-presetId" title={t('modeIdLabel')}>{row.id}</code>
-                {row.mode?.broken !== undefined && (
-                  <span className="dsh-unrestricted-issues">{row.mode.broken}</span>
+                <div className="dsh-unrestricted-modeMain">
+                  <div className="dsh-unrestricted-modeInfo">
+                    <div className="dsh-unrestricted-modeHeading">
+                      <StateDot state={dotStateOf(mode)} />
+                      <span className="dsh-unrestricted-modeName">{row.label}</span>
+                      {row.presetTag !== undefined && (
+                        <Tag tone="outline">
+                          <span className="dsh-unrestricted-mono">{row.presetTag}</span>
+                        </Tag>
+                      )}
+                      <Tag tone={modeTagTone(mode)}>{t(stateKey(mode))}</Tag>
+                    </div>
+                    {row.desc !== undefined && (
+                      <p className="dsh-unrestricted-modeDesc">{row.desc}</p>
+                    )}
+                  </div>
+                  <div className="dsh-unrestricted-headerControls">
+                    <Button
+                      variant={isOpen ? 'toolbar' : 'outline'}
+                      size="sm"
+                      onClick={() => { togglePreview(row.id) }}
+                    >
+                      {t(isOpen ? 'hidePreview' : 'showPreview')}
+                    </Button>
+                  </div>
+                </div>
+
+                {mode !== undefined && mode.issues.length > 0 && (
+                  <p className="dsh-unrestricted-issues">{formatIssues(mode.issues)}</p>
                 )}
-                <button
-                  type="button"
-                  className="dsh-unrestricted-inlineAction"
-                  onClick={() => { togglePreview(row.id) }}
-                >
-                  {t(isOpen ? 'hidePreview' : 'showPreview')}
-                </button>
-                {row.mode !== undefined && row.mode.issues.length > 0 && (
-                  <span className="dsh-unrestricted-issues">{formatIssues(row.mode.issues)}</span>
+
+                {mode?.broken !== undefined && (
+                  <p className="dsh-unrestricted-issues">{mode.broken}</p>
                 )}
+
                 {isOpen && (
                   <div className="dsh-unrestricted-preview">
                     {entry === undefined || entry.status === 'loading' ? (
-                      <p className="dsh-unrestricted-note">{t('previewLoading')}</p>
-                    ) : entry.status === 'failed' ? (
-                      <p className="dsh-unrestricted-error">
-                        {t('previewUnavailable')}{entry.message}
-                      </p>
-                    ) : entry.preview?.available === false ? (
-                      <p className="dsh-unrestricted-error">
-                        {t('previewUnavailable')}{entry.preview.reason}
+                      <p className="dsh-unrestricted-note" role="status">{t('previewLoading')}</p>
+                    ) : entry.status === 'failed' || entry.preview?.available === false ? (
+                      <p className="dsh-unrestricted-banner" data-tone="error" role="alert">
+                        {localizePreviewError(entry, t)}
                       </p>
                     ) : (
                       <>
-                        <p className="dsh-unrestricted-note">
-                          {entry.preview?.lines} {t('previewSize')} · {entry.preview?.bytes} B
-                          {entry.preview?.source !== undefined && (
-                            <> · {t(entry.preview.source === 'live' ? 'previewSourceLive' : 'previewSourceStanding')}</>
-                          )}
-                        </p>
-                        <pre className="dsh-unrestricted-previewText">{entry.preview?.text}</pre>
+                        <div className="dsh-unrestricted-previewHeader">
+                          <p className="dsh-unrestricted-previewMeta">
+                            {entry.preview?.lines} {t('previewSize')}
+                            {entry.preview?.bytes !== undefined && ` · ${fileSizeText(entry.preview.bytes)}`}
+                            {entry.preview?.source !== undefined && (
+                              ` · ${t(entry.preview.source === 'live' ? 'previewSourceLive' : 'previewSourceStanding')}`
+                            )}
+                          </p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => { void handleCopyPreview(row.id, previewText) }}
+                          >
+                            {t(copiedPreset === row.id ? 'copiedPreview' : 'copyPreview')}
+                          </Button>
+                        </div>
+                        <pre className="dsh-unrestricted-previewText">{previewText}</pre>
                       </>
                     )}
                   </div>
@@ -244,15 +618,9 @@ export function UnrestrictedCard(props: UnrestrictedCardProps) {
             )
           })}
         </ul>
-        <h4 className="dsh-unrestricted-statusTitle">{t('preflightTitle')}</h4>
-        <p className="dsh-unrestricted-note">{t('fingerprintNote')}</p>
         <p className="dsh-unrestricted-note">{t('subagentNote')}</p>
-        <p className="dsh-unrestricted-note">{t('scopeNote')}</p>
-        <div className="dsh-unrestricted-actions">
-          <button type="button" disabled={view.busy} onClick={() => { void props.recheck() }}>{t('recheck')}</button>
-          <button type="button" disabled={view.busy} onClick={() => { void props.refresh() }}>{t('refresh')}</button>
-        </div>
-      </div>
+      </section>
+
     </div>
   )
 }

@@ -44,16 +44,16 @@ The rule block (`EXECUTION_MODE_BLOCK`) covers the following areas:
 
 ---
 
-## 3. Prompt Templates
+## 3. Prompt Editing & Templates
 
-The text of the inserted `unrestricted:execution-mode` section is selectable. The default, **Original**, is the built-in block described above (`EXECUTION_MODE_BLOCK`).
+The body of the inserted `unrestricted:execution-mode` section comes from the user-editable **custom prompt** `config.customPrompt`: when empty the built-in block `EXECUTION_MODE_BLOCK` is used, otherwise the result of `resolveExecutionModeBlock(customPrompt)` (CRLF→LF; blank after trim counts as unset).
 
-- **Directory**: the plugin's `prompts/` folder; each `.md` file is one template. A leading `# Title` line names it in Settings and is stripped from the body; the rest becomes the section text verbatim. Without a heading, the filename is used.
-- **Selection**: the Prompt template dropdown in Settings. Press Re-check after adding files to rescan; a change applies from the next request and new subagents.
-- **Original**: a synthesized id `original` with no file behind it; its body is the `src/rules.js` constant, never a second copy on disk. A file named `original.md` is reserved and rejected.
-- **Scope**: a template replaces only the rule section's body. Identity, persona, plan, PTC-only, structured-output sections and tool definitions stay untouched; the original anchor checks still gate fusion, and any failure delivers the unmodified prompt.
-- **Literal delivery**: the rule section always carries `interpolate: false` (the Minimal persona shadow too), so `{{...}}` in a template stays verbatim — it is neither substituted by the host interpolator nor able to throw on an unknown or malformed reference and break the request.
-- **Shipped**: `prompts/` is in package.json `files`. `armor-en.md` carries the English armor prompt (ARMOR_EN) from `D:\dsh\dshu-prompts\02-破甲提示词-en.md`; selecting it swaps the built-in rules for that English section.
+- **Editing**: edit and save directly in the Prompt Editing text box under Settings → Unrestricted mode. Saving writes `config.customPrompt` and applies from the next request and new subagents; Discard returns to the saved text, Default clears back to the built-in Original. Ctrl/Cmd+Enter also saves.
+- **Load from template**: the "Load from template" dropdown below the editor lists the built-in Original and `prompts/*.md`. Selecting one only fills the editor draft with that body (it is not saved automatically); save it yourself once satisfied. A leading `# Title` line names it and is stripped from the body; without a heading the filename is used. Press Re-check after adding files to rescan.
+- **Original**: a synthesized id `original` with no file behind it; its body is the `src/rules.js` `EXECUTION_MODE_BLOCK` constant, never a second copy on disk. A file named `original.md` is reserved and rejected.
+- **Scope**: the edited text replaces only the rule section's body. Identity, persona, plan, PTC-only, structured-output sections and tool definitions stay untouched; the original anchor checks still gate fusion, and any failure delivers the unmodified prompt.
+- **Literal delivery**: the rule section always carries `interpolate: false` (the Minimal persona shadow too), so `{{...}}` in the text stays verbatim — it is neither substituted by the host interpolator nor able to throw on an unknown or malformed reference and break the request.
+- **Shipped**: `prompts/` is in package.json `files`. `armor-en.md` carries the English armor prompt (ARMOR_EN) from `D:\dsh\dshu-prompts\02-破甲提示词-en.md`; loading it from templates uses that English body as the editor draft.
 
 ---
 

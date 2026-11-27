@@ -18,7 +18,8 @@
  *
  * Read-only against the repo. Requires the repo's `lib/` build outputs.
  */
-import { mkdtemp, mkdir, cp, writeFile } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
+import { mkdtemp, mkdir, cp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
@@ -29,8 +30,9 @@ function arg(name) {
   return process.argv[index + 1]
 }
 
-const repo = resolve(arg('repo'))
-const pluginDir = resolve(fileURLToPath(new URL('..', import.meta.url)))
+const repo = realpathSync.native(resolve(arg('repo')))
+const pluginDir = realpathSync.native(resolve(fileURLToPath(new URL('..', import.meta.url))))
+const pluginVersion = JSON.parse(await readFile(join(pluginDir, 'package.json'), 'utf8')).version
 const bootEnabled = process.argv.includes('--boot-enabled')
 
 async function importPackage(relativeDir) {
@@ -38,8 +40,6 @@ async function importPackage(relativeDir) {
   const entry = manifest.exports?.['.']?.default ?? manifest.main
   return import(pathToFileURL(join(repo, relativeDir, entry)).href)
 }
-
-import { readFile } from 'node:fs/promises'
 
 const appBoot = await importPackage('packages/boot/app-boot')
 const cmdline = await importPackage('packages/boot/cmdline')
@@ -70,7 +70,7 @@ const overrides = [
   { id: 'web-runtime', disabled: true },
   { id: 'session-telemetry-otel', disabled: true },
   { id: 'modules', disabled: true },
-  { id: 'connection', inject: ['webServer'], config: { trustedHosts: [] } },
+  { id: 'connection', config: { trustedHosts: [] } },
   { id: 'open-in-app', disabled: true },
   { id: 'session-log-download', disabled: true },
   { id: 'client-hmr', disabled: true },
@@ -88,6 +88,8 @@ const overrides = [
   },
 ]
 if (bootEnabled) overrides.push({ id: 'unrestricted', config: { enabled: true } })
+const overridesPath = join(home, 'verify-overrides.yml')
+await writeFile(overridesPath, `${JSON.stringify(overrides, null, 2)}\n`)
 
 const installAnchor = join(repo, 'apps/cli/package.json')
 const profile = {
@@ -110,7 +112,7 @@ const ctx = await appBoot.boot('dsh-test', rootConfig, [...bundlePatches, ...ove
     name: 'spec', dir: profileDir, patchPath: profile.patchPath,
     installAnchor, home, cwd: home,
     startedBundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-unrestricted'],
-    overlays: overrides, telemetryDisabledEnv: '1',
+    overlayPaths: [overridesPath], telemetryDisabledEnv: '1',
   })
   await bootCtx.plugin(appBoot.PluginPackages, { resolution })
   cmdline.provideCmdline(bootCtx, { args: [], exit: () => {} })
@@ -152,8 +154,12 @@ async function assemblePrompt(agent) {
   }
 }
 
+async function updateSettings(patch) {
+  await ctx.settings.update('unrestricted', patch)
+}
+
 async function setEnabled(enabled) {
-  await ctx.settings.update('unrestricted', { enabled })
+  await updateSettings({ enabled })
 }
 
 /** 用原生子代理组合和作用域工具注册复现 Minimal 的角色及报告协议。 */
@@ -281,6 +287,41 @@ try {
   check('pre-existing standard session fused on next assembly', pre.text.includes(rules.EXECUTION_MODE_BLOCK))
   check('pre-existing session tools unchanged', pre.tools === baseline.standard.tools)
 
+  // Shared /api Fetch RPC routes: must register and respond without webServer in connection.inject.
+  const shared = ctx.connection.createSharedFetchHandler('/api')
+  const ownerPeer = { principal: { kind: 'owner' } }
+  async function callSharedRpc(endpoint, payload = {}) {
+    const rpcId = `verify-${endpoint}`
+    const response = await shared.fetch(new Request(`http://dsh.internal/api/dsh-unrestricted/${endpoint}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'client-request',
+        rpcId,
+        method: `dsh-unrestricted/${endpoint}`,
+        payload,
+      }),
+    }), ownerPeer)
+    return { status: response.status, body: await response.json() }
+  }
+  const rpcStatus = await callSharedRpc('status')
+  check('shared /api status RPC returns 200 ok with current version',
+    rpcStatus.status === 200
+    && rpcStatus.body?.result?.ok === true
+    && rpcStatus.body.result.value?.version === pluginVersion
+    && rpcStatus.body.result.value?.enabled === true)
+  const rpcPreview = await callSharedRpc('preview', { presetId: 'standard' })
+  check('shared /api preview RPC returns 200 ok with fused prompt',
+    rpcPreview.status === 200
+    && rpcPreview.body?.result?.ok === true
+    && rpcPreview.body.result.value?.available === true
+    && rpcPreview.body.result.value?.text?.includes(rules.EXECUTION_MODE_BLOCK))
+  const rpcRecheck = await callSharedRpc('recheck')
+  check('shared /api recheck RPC returns 200 ok',
+    rpcRecheck.status === 200
+    && rpcRecheck.body?.result?.ok === true
+    && rpcRecheck.body.result.value?.enabled === true)
+
   // Plan mode flips exactly one section.
   const planAgent = await presetAgent('standard', '-plan')
   planAgent.session.append('plan/mode', { active: true })
@@ -291,7 +332,11 @@ try {
   check('plan on: plan keeps the contract scope', planOn.text.includes('this contract decides the content'))
   planAgent.session.append('plan/mode', { active: false })
   const planOff = await assemblePrompt(planAgent)
-  check('plan off: plan section gone', !planOff.text.includes('You are in plan mode.'))
+  const hasPlanStatus = planOff.sections.includes('plan:status')
+  check('plan off: plan mode marked inactive', hasPlanStatus
+    ? (planOff.text.includes('Plan mode is inactive. The plan-mode instructions no longer apply.')
+      && !planOff.text.includes('Plan mode is active.'))
+    : !planOff.text.includes('You are in plan mode.'))
   check('plan off: still fused', planOff.text.includes(rules.EXECUTION_MODE_BLOCK))
 
   // PTC mode keeps its run_code protocol.
@@ -399,8 +444,83 @@ try {
     check(`${id} preview carries the contract`, text.includes(rules.EXECUTION_MODE_BLOCK))
   }
 
+  console.log('strip host identity')
+  for (const combo of [
+    { enabled: true, stripHostIdentity: true },
+    { enabled: false, stripHostIdentity: true },
+  ]) {
+    await updateSettings(combo)
+    for (const id of ['standard', 'ptc', 'cordis', 'minimal']) {
+      const agent = await presetAgent(id)
+      const assembled = await ctx.systemPrompt.assemble({ agent, scope: agent })
+      const refreshed = ctx.systemPrompt.refreshContext(assembled, { agent, scope: agent })
+      const prompt = {
+        text: renderPrompt(refreshed),
+        contexts: JSON.stringify(refreshed.contexts),
+      }
+      check(`stripHostIdentity (enabled=${combo.enabled}) removes DeepSeek Harness from ${id} text`,
+        !/DeepSeek Harness/i.test(prompt.text) && !/\bDSH\b/.test(prompt.text))
+      check(`stripHostIdentity (enabled=${combo.enabled}) removes dev & DSH brand contexts from ${id} even after refreshContext`,
+        !prompt.contexts.includes('harness:source')
+        && !prompt.contexts.includes('app:web-surface')
+        && !/DeepSeek Harness/i.test(prompt.contexts)
+        && !/Current DSH file policy/.test(prompt.contexts))
+    }
+    for (const id of ['standard', 'cordis']) {
+      const rpcStrippedPreview = await callSharedRpc('preview', { presetId: id })
+      check(`stripHostIdentity (enabled=${combo.enabled}) strips DeepSeek Harness from ${id} preview RPC`,
+        rpcStrippedPreview.status === 200
+        && rpcStrippedPreview.body?.result?.ok === true
+        && rpcStrippedPreview.body.result.value?.available === true
+        && !/DeepSeek Harness/i.test(rpcStrippedPreview.body.result.value.text))
+    }
+  }
+
+  console.log('custom prompt editing')
+  const customBlock = '## Custom local execution mode\n\nPreserve literal {{char}} and {{user}} tokens without interpolation errors.'
+  await updateSettings({ enabled: true, stripHostIdentity: false, customPrompt: customBlock })
+  await until('custom prompt propagation', async () =>
+    (await assemblePrompt(await presetAgent('standard'))).text.includes(customBlock))
+
+  for (const id of ['standard', 'ptc', 'cordis', 'minimal']) {
+    const customAssembled = await assemblePrompt(await presetAgent(id))
+    check(`customPrompt applies to ${id} live assembly with literal {{...}} intact`,
+      customAssembled.text.includes(customBlock) && !customAssembled.text.includes(rules.EXECUTION_MODE_BLOCK))
+  }
+  const customMinimalChildPrompt = await assemblePrompt(customMinimal)
+  check('customPrompt applies to minimal custom subagent',
+    customMinimalChildPrompt.text.includes(customBlock) && !customMinimalChildPrompt.text.includes(rules.EXECUTION_MODE_BLOCK))
+
+  const customStatusRpc = await callSharedRpc('status')
+  check('status RPC reports customPrompt, defaultPrompt, and isCustomPrompt=true',
+    customStatusRpc.status === 200
+    && customStatusRpc.body?.result?.ok === true
+    && customStatusRpc.body.result.value?.customPrompt === customBlock
+    && customStatusRpc.body.result.value?.defaultPrompt === rules.EXECUTION_MODE_BLOCK
+    && customStatusRpc.body.result.value?.isCustomPrompt === true)
+  for (const id of ['standard', 'minimal']) {
+    const customPreviewRpc = await callSharedRpc('preview', { presetId: id })
+    check(`preview RPC for ${id} renders customPrompt`,
+      customPreviewRpc.status === 200
+      && customPreviewRpc.body?.result?.ok === true
+      && customPreviewRpc.body.result.value?.available === true
+      && customPreviewRpc.body.result.value.text.includes(customBlock))
+  }
+
+  await updateSettings({ customPrompt: '' })
+  await until('custom prompt reset to default', async () =>
+    (await assemblePrompt(await presetAgent('standard'))).text.includes(rules.EXECUTION_MODE_BLOCK))
+  const minimalReset = await assemblePrompt(await presetAgent('minimal'))
+  check('clearing customPrompt restores default block on minimal too',
+    minimalReset.text === expectedMinimal)
+  const resetStatusRpc = await callSharedRpc('status')
+  check('status RPC reports isCustomPrompt=false after reset',
+    resetStatusRpc.status === 200
+    && resetStatusRpc.body?.result?.ok === true
+    && resetStatusRpc.body.result.value?.isCustomPrompt === false)
+
   console.log('toggle off')
-  await setEnabled(false)
+  await updateSettings({ enabled: false, stripHostIdentity: false, customPrompt: '' })
   for (const id of ['standard', 'ptc', 'cordis', 'minimal']) {
     const off = await until(`${id} restore`, async () => {
       const prompt = await assemblePrompt(await presetAgent(id))

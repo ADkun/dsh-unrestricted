@@ -56,10 +56,11 @@ last_reviewed: 2026-10-18
 | TC-T06 | 配置读取 | `readTemplate` 接受 config 句柄与纯对象，空串/非字符串视为未配置 | 对外接口 | 机检 |
 | TC-T07 | FusionResult | 规则段与 Minimal 影子恒带 `interpolate: false`：模板里的 `{{...}}` 不参与插值，也不致装配抛错 | I12 | 机检 |
 | TC-T08 | `scanTemplates` | 空 id（文件名 `.md`）与重名 id 进 `problems`，不生成第二个同 id 选项 | I10 | 机检 |
+| TC-T09 | 自定义提示词 | `resolveExecutionModeBlock(customPrompt)`：空/空白回内置块，非空按字面整理（CRLF→LF、trim 空判空）；`fuseSections` 与 `fusedMinimalPrompt` 以其输出作 block | I7、I12 | 机检 |
 | TC-L01 | 装配降级 | 瀑布内任何异常都不穿透，返回原始装配 | 非功能红线 1 | 评 |
 | TC-L02 | 开关关闭 | 关闭后不读不写提示词，界面回到未安装态 | I1 | 人 |
 
-用例总数以 `pnpm test` 的输出为准（当前 `pass 57` 含子断言；模板相关 14 条在
+用例总数以 `pnpm test` 的输出为准（当前 `pass 62` 含子断言；模板相关 14 条在
 `tests/templates.spec.mjs`）；新增用例必须同时在本表登记，ID 与不变量编号互指。
 
 ## 迁移矩阵
@@ -101,4 +102,4 @@ last_reviewed: 2026-10-18
 | HR-03 | 装配期惰性 | 只打开一个非 minimal 预设时，`status` 不应阻塞在该预设以外的校验上（观察设置页首次打开耗时） |
 | HR-04 | 界面文案归属 | 设置页一节与输入框开关同源：任一处切换后另一处无需刷新即一致 |
 | HR-05 | 真机验收 | `node tools/verify-live.mjs --repo <DSH 源码树>` 全绿；无源码树时该项在 `docs-work/pending.md` 保持未销账 |
-| HR-06 | 模板选择生效 | 设置页选 `armor-en` 后，任一预设的预览正文等于 `prompts/armor-en.md` 正文（不含标题行），重启后仍保持所选模板 |
+| HR-06 | 提示词编辑生效 | 设置页编辑框改写正文并保存后，任一预设的预览正文等于所存 `customPrompt` 的解析结果；「从模板载入」`armor-en` 后保存，预览等于 `prompts/armor-en.md` 正文（不含标题行）；清空回内置原版；重启后仍保持已存正文 |

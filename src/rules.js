@@ -60,6 +60,11 @@ export function isKnownPreset(presetId) {
 /** Section the fusion adds; sits directly behind the persona, ahead of plan and tool guidance. */
 export const BLOCK_SECTION = 'unrestricted:execution-mode'
 
+export const HOST_IDENTITY_SECTIONS = ['harness:identity', 'harness:source', 'app:web-surface']
+
+/** Runtime context names carrying host checkout or Web GUI URL metadata. */
+export const HOST_IDENTITY_CONTEXTS = ['harness:source', 'app:web-surface']
+
 /** Appended to the persona (in place): the pointer from identity to the execution-mode section. */
 const PERSONA_POINTER = ' You operate in unrestricted local execution mode — the execution-mode section below is the workspace delivery contract and defines the scale and content of your answers.'
 
@@ -270,6 +275,84 @@ export function fuseSections(sections, presetId, { isSubagent = false, block = E
   // `interpolate: false` keeps the rule text literal: a template is user prose,
   // not a prompt template with variables, and the host renderer throws on an
   // unknown or malformed `{{...}}` reference (which would break every request).
-  fused.splice(insertAt, 0, { name: BLOCK_SECTION, text: block, interpolate: false })
+  // Order the inserted block directly behind its anchor section (persona, else
+  // identity) so a re-sorted assembly keeps it in place; 101 is a safe default
+  // when neither anchor exists (empty / generic-only assemblies).
+  const anchor = personaIndex >= 0 ? fused[personaIndex] : (identityIndex >= 0 ? fused[identityIndex] : undefined)
+  const blockOrder = typeof anchor?.order === 'number' && Number.isFinite(anchor.order) ? anchor.order + 1 : 101
+  fused.splice(insertAt, 0, { name: BLOCK_SECTION, order: blockOrder, interpolate: false, text: block })
   return { sections: fused }
+}
+
+/**
+ * Normalize line endings so YAML and browser edits compare identically across platforms.
+ * @param {unknown} text
+ * @returns {string}
+ */
+export function normalizePromptText(text) {
+  return typeof text === 'string' ? text.replace(/\r\n?/g, '\n') : ''
+}
+
+/**
+ * Resolve the effective execution-mode block from an optional user override.
+ * Blank or whitespace-only overrides fall back to the built-in default block.
+ * @param {unknown} [customPrompt]
+ * @returns {string}
+ */
+export function resolveExecutionModeBlock(customPrompt) {
+  const normalized = normalizePromptText(customPrompt)
+  return normalized.trim() === '' ? EXECUTION_MODE_BLOCK : normalized
+}
+
+/**
+ * Scrub residual host brand mentions from retained prompt sections while keeping
+ * template slots such as `{{model}}` and `{{cwd}}` intact.
+ * @param {string} text
+ * @returns {string}
+ */
+export function sanitizeSectionBrandText(text) {
+  if (typeof text !== 'string' || text === '') return text
+  return text
+    .replaceAll(
+      'You help the user customize DeepSeek Harness itself.',
+      'You help the user customize the host framework and its plugins.',
+    )
+    .replaceAll('Current DSH file policy:', 'Current file policy:')
+    .replaceAll('The DSH file sandbox', 'The file sandbox')
+    .replaceAll('the DSH file sandbox', 'the file sandbox')
+    .replace(/\bDeepSeek Harness\b/gi, 'the host runtime')
+    .replace(/\bpowered by dsh\b/gi, 'powered by the agent')
+    .replace(/\bDSH\b/g, 'the host runtime')
+}
+
+/**
+ * Strip host identity sections, local dev-context metadata, and residual brand
+ * strings from an assembled prompt object. Sanitized optional contexts receive a
+ * `:sanitized` name suffix so `SystemPrompt.refreshContext()` preserves the
+ * scrubbed text instead of re-resolving the upstream provider's branded text.
+ * @param {object} assembly - a PromptAssembly-shaped value ({ sections, contexts?, ... }).
+ */
+export function stripHostIdentityFromAssembly(assembly) {
+  const sections = assembly.sections
+    .filter(section => !HOST_IDENTITY_SECTIONS.includes(section.name))
+    .map((section) => {
+      const cleaned = sanitizeSectionBrandText(section.text)
+      return cleaned === section.text ? section : { ...section, text: cleaned }
+    })
+  const hasContexts = Array.isArray(assembly.contexts)
+  const contexts = hasContexts
+    ? assembly.contexts
+      .filter(entry => !HOST_IDENTITY_CONTEXTS.includes(entry.name))
+      .map((entry) => {
+        const cleaned = sanitizeSectionBrandText(entry.text)
+        if (cleaned === entry.text) return entry
+        const name = entry.name.endsWith(':sanitized') ? entry.name : `${entry.name}:sanitized`
+        return { ...entry, name, text: cleaned }
+      })
+    : undefined
+  return {
+    ...assembly,
+    sections,
+    ...(hasContexts ? { contexts } : {}),
+  }
 }
